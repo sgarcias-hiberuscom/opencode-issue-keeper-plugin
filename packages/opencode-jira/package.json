@@ -1,0 +1,18 @@
+{
+  "name": "@issuekeeper/opencode-jira",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./dist/index.js" },
+  "files": ["dist", "README.md", "options.schema.json", "opencode.example.jsonc"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/schema.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --maxWorkers=2",
+    "test:pack": "npm run build && node scripts/pack-smoke.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": { "@opencode/plugin": "2.2.5", "zod": "4.6.7" },
+  "devDependencies": { "@types/node": "22.20.0", "typescript": "5.9.3", "vitest": "4.1.12" }
+}

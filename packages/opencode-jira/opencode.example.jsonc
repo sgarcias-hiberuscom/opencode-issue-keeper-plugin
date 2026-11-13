@@ -1,0 +1,50 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      // Ruta relativa al opencode.jsonc situado en la raíz de IssueKeeper.
+      "package": "./packages/opencode-jira",
+      "options": {
+        "accounts": [
+          {
+            "id": "trabajo",
+            "label": "Agente de soporte",
+            "siteUrl": "https://empresa.atlassian.net",
+            "auth": {
+              "mode": "cloud-token",
+              "email": "agente@example.com",
+              "tokenFile": "/home/usuario/.config/issuekeeper/secrets/trabajo.token"
+            },
+            "readOnly": true,
+            "serviceManagement": { "enabled": true },
+            "allowedProjects": ["IK"],
+            "allowedUpdateFields": []
+          },
+          {
+            "id": "cliente",
+            "label": "Cliente del portal",
+            "siteUrl": "https://empresa.atlassian.net",
+            "auth": {
+              "mode": "cloud-token",
+              "email": "cliente@example.com",
+              "tokenEnv": "JIRA_CLIENTE_API_TOKEN"
+            },
+            "readOnly": true,
+            "serviceManagement": { "enabled": true },
+            "allowedProjects": ["IK"],
+            "allowedUpdateFields": []
+          }
+        ],
+        "defaultAccount": "trabajo",
+        "attachments": { "downloadDir": ".issuekeeper/downloads", "overwrite": false }
+      }
+    }
+  ],
+  "permissions": [
+    { "action": "jira.accounts", "resource": "*", "effect": "allow" },
+    { "action": "jira.read", "resource": "*", "effect": "ask" },
+    { "action": "jira.write", "resource": "*", "effect": "deny" },
+    { "action": "jira.download", "resource": "*", "effect": "ask" },
+    { "action": "edit", "resource": "*/.issuekeeper/*", "effect": "ask" }
+  ]
+}

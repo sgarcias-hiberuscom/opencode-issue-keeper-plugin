@@ -1,0 +1,31 @@
+name: Jira read plugin
+on:
+  push:
+    paths: ["packages/opencode-jira/**", ".github/workflows/jira-read.yml"]
+  pull_request:
+    paths: ["packages/opencode-jira/**", ".github/workflows/jira-read.yml"]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    defaults:
+      run:
+        working-directory: packages/opencode-jira
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: packages/opencode-jira/package-lock.json
+      - run: mkdir -p /tmp/opencode
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm pack --dry-run
+      - run: npm run test:pack
