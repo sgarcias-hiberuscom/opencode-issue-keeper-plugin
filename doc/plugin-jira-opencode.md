@@ -42,6 +42,9 @@ También se podrán realizar estas operaciones mediante comandos de OpenCode.
 - Actualizar atributos estándar (por ejemplo, resumen, descripción, prioridad o persona asignada) y campos personalizados
   autorizados.
 - Añadir comentarios al ticket, incluidas notas internas y respuestas públicas al informador en Jira Service Management.
+- Preparar comentarios con texto normal o enriquecido mediante Markdown: párrafos, saltos, negrita, cursiva, encabezados,
+  listas, enlaces, código, citas y tablas, combinables con menciones. Mostrar el resultado y advertir de cualquier limitación
+  de formato antes de publicar, también en comentarios JSM con adjuntos.
 - Mencionar a personas mediante `@usuario` en los comentarios, también en notas internas, respuestas públicas y comentarios con
   adjuntos de JSM. Resolver la identidad real, pedir aclaración si hay ambigüedad y mostrar las menciones antes de publicar.
 - Listar, descargar y cargar ficheros adjuntos, conservando su visibilidad interna o pública cuando corresponda.
@@ -79,8 +82,12 @@ workflows o sincronizar todos los tickets.
 comentarios internos y respuestas públicas visibles para el informador.
 
 Las menciones reales a personas también son obligatorias en ese alcance: no basta con publicar el nombre precedido de `@` como
-texto. La entrega deberá incluir su resolución, representación en cada API, revisión y validación en Jira de pruebas. El resto del
-formato enriquecido, como tablas o Markdown completo, podrá incorporarse después.
+texto. La entrega deberá incluir su resolución, representación en cada API, revisión y validación en Jira de pruebas.
+
+También se incluye el texto enriquecido con el conjunto de elementos Markdown descrito en la sección 5.6. El plugin deberá
+documentar y probar su representación en cada API, sin perder formato silenciosamente. No se pretende soportar todo el lenguaje
+Markdown ni crear un editor completo: quedan fuera inicialmente el HTML arbitrario, los estilos personalizados y las imágenes
+remotas incrustadas. Las imágenes podrán seguir tratándose como adjuntos mediante las operaciones previstas.
 
 Para gestionar notas internas y respuestas públicas, el plugin deberá utilizar la API específica de Jira Service Management (JSM).
 Restringir un comentario por rol o grupo mediante la API general de Jira no lo convierte en una nota interna de JSM.
@@ -210,6 +217,8 @@ IssueKeeper/
 │     │  ├─ core/                 Lógica común, independiente de OpenCode y de la API de Jira.
 │     │  │  ├─ provider.ts        Contrato de las operaciones que debe ofrecer un proveedor de tickets.
 │     │  │  ├─ ticket.ts          Estructuras de datos comunes para tickets y elementos relacionados.
+│     │  │  ├─ comment.ts         Texto de origen, formato, menciones y estructura común de comentarios enriquecidos.
+│     │  │  ├─ markdown.ts        Análisis seguro del Markdown admitido, conservando posiciones del texto de origen.
 │     │  │  ├─ service.ts         Coordinación de consultas y cambios, con las restricciones configuradas.
 │     │  │  └─ proposals.ts       Preparación, conservación y control de vigencia de propuestas de cambio.
 │     │  ├─ jira/                 Implementación específica de Jira Cloud y Jira Service Management.
@@ -219,6 +228,7 @@ IssueKeeper/
 │     │  │  ├─ mentions.ts        Construcción y lectura de menciones reales según la API de publicación.
 │     │  │  ├─ attachments.ts     Listado y transferencia de adjuntos mediante las APIs de Jira y JSM.
 │     │  │  ├─ adf.ts             Conversión entre texto y el formato de texto enriquecido de Jira (ADF).
+│     │  │  ├─ rich-text.ts       Conversión del contenido común al formato de JSM y comprobación de compatibilidad.
 │     │  │  └─ schemas.ts         Definición y validación de los datos intercambiados con Jira.
 │     │  └─ tools/                Herramientas que se ofrecen a los modelos a través de OpenCode.
 │     │     ├─ schemas.ts         Definición de los argumentos y resultados de las herramientas.
@@ -965,6 +975,11 @@ En las herramientas de preparación de comentarios y cargas, `audience` es oblig
 aprobar el cambio. En `jira_comments_list`, es un filtro opcional para seleccionar el tipo de comentarios que se desea consultar;
 sólo se devolverán comentarios accesibles para la cuenta utilizada. La sección 5.9 detalla estas diferencias.
 
+El parámetro **`format` indica cómo interpretar el contenido del comentario**, no quién puede verlo: `plain` lo trata como
+texto normal y `markdown` interpreta el formato admitido en la sección 5.6. Si se omite, se utilizará `plain`. En
+`jira_comment_prepare` se aplica a `text`; en las cargas JSM con comentario, a `comment`. Las menciones resueltas mediante
+`mentions` se pueden utilizar en ambos formatos. Solicitar formato no modifica los permisos ni la audiencia.
+
 | Herramienta propuesta            | Función y operaciones utilizadas (sección 5.1)                                                                                                                                                                                                                                                         | Entrada principal                                                                        | Resultado                                                                                                                       |
 |----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
 | `jira_accounts_list`             | Mostrar las cuentas disponibles a partir de la configuración y su estado local, sin peticiones a Jira.                                                                                                                                                                                                 | `{}`                                                                                     | Alias, etiqueta, sitio, cuenta predeterminada, capacidades y estado local, sin secretos.                                        |
@@ -978,8 +993,8 @@ sólo se devolverán comentarios accesibles para la cuenta utilizada. La secció
 | `jira_issue_edit_metadata`       | Consultar el ticket y **Campos editables**, excluyendo de las opciones de edición los campos restringidos localmente.                                                                                                                                                                                  | `account`, `issueKey`                                                                    | Campos y operaciones editables autorizados.                                                                                     |
 | `jira_transitions_list`          | Consultar el ticket y **Transiciones** para conocer los cambios de estado disponibles.                                                                                                                                                                                                                 | `account`, `issueKey`                                                                    | Transiciones disponibles y campos requeridos.                                                                                   |
 | `jira_issue_update_prepare`      | Preparar una edición de atributos utilizando **Consultar ticket** y **Campos editables**, sin ejecutar todavía **Actualizar campos**.                                                                                                                                                                  | `account`, `issueKey`, `expectedUpdated`, `fields?`, `update?`                           | Propuesta sin escritura remota.                                                                                                 |
-| `jira_comment_prepare`           | Consultar el ticket y, para JSM, **Identificar solicitud JSM**. Revalidar las personas mencionadas con las consultas de identidad y audiencia. Preparar el contenido sin publicarlo.                                                                                                                   | `account`, `issueKey`, `expectedUpdated`, `text`, `audience`, `visibility?`, `mentions?` | Propuesta de comentario ordinario, interno o público con menciones resueltas; `visibility` sólo para restricciones de Platform. |
-| `jira_attachment_upload_prepare` | Utilizar **Consultar ticket** y **Metadata/configuración de adjuntos** (Platform) o **Identificar solicitud JSM**. Preparar copias locales y, si hay comentario, validar sus menciones, sin cargas remotas.                                                                                            | `account`, `issueKey`, `expectedUpdated`, `files`, `audience`, `comment?`, `mentions?`   | Propuesta con ficheros fijados por hash; permite comentario JSM con adjuntos y menciones resueltas.                             |
+| `jira_comment_prepare`           | Consultar el ticket y, para JSM, **Identificar solicitud JSM**. Validar las menciones, interpretar `format` y preparar el contenido compatible con el destino, sin publicarlo. | `account`, `issueKey`, `expectedUpdated`, `text`, `audience`, `visibility?`, `format?`, `mentions?` | Propuesta de comentario normal o enriquecido, con menciones y limitaciones de formato explícitas; `visibility` sólo para Platform. |
+| `jira_attachment_upload_prepare` | Utilizar **Consultar ticket** y **Metadata/configuración de adjuntos** (Platform) o **Identificar solicitud JSM**. Preparar copias locales y, si hay comentario, validar su formato y menciones, sin cargas remotas. | `account`, `issueKey`, `expectedUpdated`, `files`, `audience`, `comment?`, `format?`, `mentions?` | Propuesta con ficheros fijados por hash; permite comentario JSM normal o enriquecido con menciones resueltas. |
 | `jira_transition_prepare`        | Preparar un cambio de estado utilizando **Consultar ticket** y **Transiciones**, sin ejecutar todavía **Cambiar estado**.                                                                                                                                                                              | `account`, `issueKey`, `expectedUpdated`, `transitionId`, `fields?`                      | Propuesta de transición.                                                                                                        |
 | `jira_change_apply`              | Revalidar y solicitar autorización de la propuesta. Según su tipo, ejecutar **Actualizar campos**, **Añadir comentario**, **Publicar comentario JSM**, **Cambiar estado**, **Cargar adjuntos Platform** o **Carga temporal JSM** seguida de **Publicar adjuntos JSM**; después verificar el resultado. | `proposalId`                                                                             | Autorización, ejecución y resultado de un cambio inmutable.                                                                     |
 
@@ -998,6 +1013,11 @@ internamente los IDs temporales JSM. No crear una herramienta alternativa que su
 comentario o si se solicita un comentario asociado a una carga Platform sin un contrato específico para publicarlo. Su estructura
 y validaciones se detallan en la sección 5.6. Que el argumento sea opcional significa que se puede comentar sin mencionar a nadie,
 no que el soporte de menciones sea opcional en la entrega.
+
+`format` se rechazará en una carga si no hay `comment`, o si se pretende publicar un comentario mediante una carga Platform
+sin el contrato específico correspondiente. Este parámetro pertenece a las herramientas de comentarios; no cambia por sí solo
+el contrato de edición de `description` u otros atributos del ticket. La actualización de esos campos seguirá las secciones
+5.5 y 5.6 y validará el formato que requiera cada campo.
 
 ### 5.3. Selección de cuenta
 
@@ -1343,14 +1363,15 @@ No se utilizarán opciones como `overrideScreenSecurity` ni `overrideEditableFla
 de edición de Jira, para eludir restricciones. Tampoco se desactivarán las notificaciones por defecto: puede requerir privilegios
 adicionales y cambiar los efectos esperados de la actualización.
 
-### 5.6. Comentarios y Atlassian Document Format
+### 5.6. Comentarios, texto enriquecido y Atlassian Document Format
 
-El usuario puede pedir «añade este comentario» o «actualiza la descripción» utilizando texto normal. Sin embargo, el plugin debe
-convertir ese texto al formato que espera la operación de Jira correspondiente. El usuario no tendrá que escribir ese formato ni
-conocer su estructura.
+El usuario puede pedir comentarios en texto normal o con formato, describiendo el resultado en lenguaje natural o proporcionando
+Markdown. El plugin convertirá el contenido al formato que espera la operación de Jira correspondiente. El usuario no tendrá
+que escribir ADF ni conocer su estructura. La edición de descripciones también debe respetar su formato, pero no utiliza
+automáticamente el nuevo argumento `format` de las herramientas de comentarios.
 
 Esta sección explica el formato utilizado por la API general de Jira, cómo convertirlo y leerlo, y cómo distinguir el contenido
-del comentario de su visibilidad.
+del comentario de su visibilidad. El formato enriquecido y las menciones forman parte del alcance inicial de escritura.
 
 #### Qué es ADF y cuándo se utiliza
 
@@ -1371,6 +1392,118 @@ recibe el texto de sus comentarios en una cadena. No se intercambiarán ambos fo
 ADF no es Markdown. Enviar directamente un texto como `**Revisado**` no equivale a construir un documento con la palabra
 «Revisado» en negrita. Si se quiere conservar formato Markdown, habrá que interpretarlo y generar los elementos ADF
 correspondientes mediante un conversor probado.
+
+#### Cómo solicita el usuario un comentario con formato
+
+El usuario podrá describir el resultado sin escribir Markdown. Por ejemplo:
+
+> En IK-123 de trabajo, prepara una nota interna con el encabezado «Diagnóstico», la causa en negrita, una lista numerada
+> de pasos y los logs en un bloque de código. Menciona a Ana García para que lo revise.
+
+El modelo resolverá las menciones, construirá el contenido Markdown y llamará a `jira_comment_prepare` con `format: "markdown"`.
+No publicará directamente: devolverá una propuesta para revisión y aplicación mediante `jira_change_apply`.
+
+También se podrá pedir «prepara este comentario con formato Markdown» y pegar el contenido:
+
+````markdown
+## Diagnóstico
+
+La causa es una **validación incorrecta**.
+
+Pasos para reproducir:
+1. Abrir el formulario.
+2. Introducir una dirección incompleta.
+
+```text
+Validation failed: missing postal code
+```
+````
+
+El mismo mecanismo se podrá utilizar para una respuesta pública o para el comentario que acompaña a adjuntos JSM, conservando
+la cuenta y audiencia elegidas. También funcionará desde los comandos slash, que siguen enviando instrucciones al modelo.
+
+#### Contrato de entrada: `plain` o `markdown`
+
+El parámetro `format` de `jira_comment_prepare` y de `jira_attachment_upload_prepare` tendrá estos valores:
+
+| Valor | Interpretación |
+| --- | --- |
+| `plain` | Texto normal: `**texto**` conserva sus asteriscos y no se transforma en negrita. Se podrán incorporar las menciones explícitas de `mentions`. |
+| `markdown` | Interpretar el conjunto de elementos Markdown admitido y convertirlo al formato específico de Jira o JSM, con las menciones validadas. |
+| Omitido | Aplicar `plain`, para no reinterpretar accidentalmente comentarios existentes. |
+
+Por ejemplo, los argumentos para preparar un comentario ordinario con formato podrían ser:
+
+```json
+{
+  "account": "trabajo",
+  "issueKey": "IK-123",
+  "expectedUpdated": "2026-11-04T09:35:12.000+0000",
+  "audience": "ticket",
+  "format": "markdown",
+  "text": "## Diagnóstico\n\nLa causa es una **validación incorrecta**."
+}
+```
+
+`format` es una instrucción para el plugin; no se enviará como un campo adicional del comentario a Jira. La interpretación
+se hará durante la preparación y quedará fijada en la propuesta. Cambiar `plain` por `markdown` después de aprobar requiere
+una propuesta nueva, porque el mismo texto puede producir un contenido diferente.
+
+#### Elementos enriquecidos del alcance inicial
+
+El plugin interpretará un conjunto explícito de Markdown, no cualquier extensión disponible en una biblioteca:
+
+| Elemento | Uso previsto |
+| --- | --- |
+| Párrafos y saltos de línea | Separar ideas y conservar saltos explícitos; un salto ordinario dentro de un párrafo seguirá las reglas Markdown documentadas. |
+| Negrita y cursiva | Destacar palabras mediante `**texto**` y `*texto*`. |
+| Encabezados | Organizar el comentario con títulos, por ejemplo `## Diagnóstico`. |
+| Listas numeradas y con viñetas | Expresar pasos, tareas o elementos relacionados, incluidos niveles anidados con límites. |
+| Enlaces | Mostrar texto enlazado, por ejemplo `[Documentación](https://example.com)`. |
+| Código en línea y bloques de código | Conservar ejemplos, comandos o logs como contenido literal, sin ejecutarlos. |
+| Citas | Distinguir fragmentos citados mediante `>`. |
+| Tablas | Organizar datos con cabeceras y filas mediante la extensión de tablas Markdown adoptada y documentada. |
+| Menciones | Incorporar las identidades resueltas mediante `mentions`, combinables con el resto del contenido. Un `@` aislado no basta. |
+
+El analizador y sus opciones se fijarán y probarán para que el mismo contenido produzca resultados reproducibles. No se
+incluirán inicialmente HTML arbitrario, estilos personalizados ni imágenes remotas incrustadas. No se confundirá el formato
+del comentario con un mecanismo de publicación de archivos: los adjuntos conservan su flujo independiente de permisos.
+
+#### Cómo se convierte y revisa el contenido enriquecido
+
+1. **Validar la entrada:** formato conocido, tamaño del texto, número de elementos, profundidad de anidamiento y menciones.
+2. **Analizar el contenido:** para `markdown`, utilizar una biblioteca que reconozca su estructura y conserve las posiciones
+   del texto de origen. No interpretar el documento mediante sustituciones de cadenas o expresiones regulares aisladas.
+3. **Construir una representación común:** describir párrafos, encabezados, listas, enlaces, código, citas, tablas y menciones
+   mediante elementos estructurados, independientes de la API de destino.
+4. **Resolver las menciones:** insertar únicamente las identidades validadas en los fragmentos permitidos, sin confundir texto
+   literal, delimitadores Markdown o direcciones de enlaces con personas mencionadas.
+5. **Convertir según el destino:** producir ADF para Jira Platform o la representación admitida en las cadenas de JSM.
+6. **Comprobar compatibilidad:** detectar elementos sin equivalencia y explicar las limitaciones antes de ofrecer una propuesta
+   aplicable. No eliminar tablas, listas, enlaces o formato en silencio.
+7. **Mostrar el resultado revisable:** incluir una representación legible del contenido final, su formato, audiencia, personas
+   mencionadas y cualquier diferencia relevante respecto a lo solicitado. El texto fuente por sí solo no demuestra cómo lo
+   interpretará Jira; la representación de destino debe estar probada.
+8. **Fijar y autorizar:** guardar el texto original, el formato y el contenido final en una propuesta inmutable. Después de
+   aprobar, enviar ese contenido sin volver a interpretarlo con otras opciones o añadir conversiones no revisadas.
+
+En **Jira Platform**, el adaptador construirá los nodos ADF y sus atributos de formato. En **JSM**, el hecho de que `body` o
+`additionalComment.body` sean cadenas no implica que interpreten Markdown directamente: el adaptador deberá convertir a la
+representación que admita cada operación y comprobar su resultado en Jira de pruebas. No se enviará ADF a esos campos.
+
+La entrega documentará una matriz por elemento y destino: comentarios Platform, notas internas JSM, respuestas públicas JSM y
+comentarios JSM con adjuntos. Indicará el soporte comprobado y sus límites. No se anunciará como compatible una combinación
+que no se haya validado, ni se intentará sustituir el endpoint o cambiar la audiencia para obtener formato.
+
+Si un elemento no se puede representar, se devolverá `FORMAT_NOT_SUPPORTED` con una explicación y una alternativa propuesta.
+Por ejemplo: «Esta operación no permite conservar la tabla; puedo convertirla en una lista». Sólo se preparará la alternativa
+cuando el usuario la acepte, y su publicación seguirá requiriendo la revisión y autorización correspondientes. No bastará con
+añadir una advertencia y publicar de todos modos un contenido diferente.
+
+Los enlaces sólo admitirán los protocolos expresamente permitidos por el conversor, inicialmente HTTP y HTTPS; se rechazarán
+destinos ejecutables o locales como `javascript:`, `data:` o `file:`. El análisis no abrirá enlaces, descargará imágenes,
+ejecutará código ni accederá a archivos. Los elementos HTML no admitidos se señalarán como incompatibles, no se insertarán
+directamente ni se eliminarán de forma silenciosa.
 
 #### Ejemplo de un comentario sencillo en ADF
 
@@ -1411,7 +1544,8 @@ el modelo podrá proporcionar texto mediante las herramientas de preparación.
 
 Para los fragmentos sin menciones se propone una conversión sencilla: transformar cada línea de texto en un párrafo ADF. El
 siguiente código correspondería a `packages/opencode-jira/src/jira/adf.ts`. Es una función auxiliar para texto normal, **no el
-conversor completo de comentarios de la primera entrega**, que también deberá construir las menciones descritas a continuación:
+conversor completo de comentarios de la primera entrega**, que también deberá interpretar Markdown cuando se solicite y
+construir las menciones descritas a continuación:
 
 ```ts
 export function textToAdf(text: string) {
@@ -1438,8 +1572,9 @@ conversión se realizará al preparar el cambio, para que el contenido que se re
 
 Esta función auxiliar **no interpreta Markdown ni crea listas, tablas, enlaces o menciones de usuarios**. Por ejemplo, una línea
 que empiece por `-` se conservará como texto, no como un elemento de lista. Las menciones se incorporarán mediante el tratamiento
-específico obligatorio de esta sección; no se pasará un comentario con menciones por esta función como si fuera texto plano. El
-soporte general de Markdown y de otros elementos enriquecidos podrá incorporarse después con validación y pruebas.
+específico obligatorio de esta sección; no se pasará un comentario con menciones o `format: "markdown"` por esta función
+como si fuera texto plano. El conversor completo deberá soportar desde la primera entrega el conjunto enriquecido descrito
+anteriormente. Las extensiones que no formen parte de ese conjunto podrán incorporarse después con validación y pruebas.
 
 #### Menciones reales a personas desde la primera entrega
 
@@ -1495,6 +1630,12 @@ una vez resuelta la persona:
 Las posiciones se contarán en unidades UTF-16, como los índices de cadenas de JavaScript, y no en bytes. El esquema deberá exigir
 posiciones enteras dentro del texto, fragmentos no vacíos y sin solapamientos ni cortes de caracteres representados por pares
 UTF-16. `accountId` identifica a la persona; no es el alias `account` de conexión.
+
+Con `format: "markdown"`, esas posiciones se referirán al texto fuente original, antes de convertirlo o normalizar sus saltos
+de línea. El analizador deberá conservar la correspondencia con los fragmentos visibles. Se rechazarán intervalos que
+incluyan delimitadores de formato, destinos de enlaces o contenido de código en línea o en bloque; en esos contextos se
+conservará texto literal, no una mención. No se recalcularán posiciones sobre el texto ya transformado, porque podrían apuntar
+a una persona o fragmento diferente.
 
 La misma estructura se aplicará a `comment` en las cargas JSM con comentario. Si no hay personas mencionadas, `mentions` podrá
 omitirse o ser `[]`. El plugin no convertirá cualquier `@` en una mención: un email o un fragmento citado puede ser texto literal.
@@ -1574,14 +1715,69 @@ JSM.
 
 ### 5.7. Transiciones de estado
 
-1. Consultar las transiciones disponibles para ese ticket y usuario.
-2. Seleccionar por ID; mostrar nombre y estado destino.
-3. Si el usuario da sólo un nombre y hay varias coincidencias, pedir aclaración.
-4. Obtener campos requeridos con `expand=transitions.fields`.
-5. Preparar el payload y mostrar efectos conocidos.
-6. Revalidar que la transición sigue disponible inmediatamente antes de ejecutar.
+En Jira, un ticket sigue un **flujo de trabajo** (*workflow*), que define sus estados y las acciones permitidas para pasar de uno
+a otro. Por ejemplo, un proyecto podría permitir pasar de «Abierto» a «En curso» mediante la acción «Iniciar trabajo», y de
+«En curso» a «Resuelto» mediante «Resolver».
 
-Ejemplo de payload Jira:
+Cada una de esas acciones es una **transición**. El estado es la situación del ticket; la transición es la acción que Jira
+permite ejecutar. No basta con enviar el nombre del estado deseado como un atributo del ticket: hay que seleccionar una
+transición disponible y ejecutarla mediante su operación específica.
+
+Los nombres, identificadores y recorridos dependen del proyecto y del tipo de ticket. También pueden variar según el usuario,
+el estado actual y las condiciones del flujo. Por eso, el plugin no tendrá una tabla fija de equivalencias como
+«Resuelto = transición 31».
+
+#### Cómo se consulta y selecciona la transición
+
+Ante «pasa IK-123 a En curso con la cuenta trabajo», el modelo utilizará `jira_transitions_list`. El plugin consultará el
+ticket y realizará:
+
+```text
+GET /rest/api/3/issue/IK-123/transitions?expand=transitions.fields
+```
+
+La respuesta identifica las transiciones disponibles, su nombre, el estado de destino y los datos adicionales que puedan
+necesitar. `expand=transitions.fields` solicita que se incluya información sobre los campos del formulario de cada transición,
+por ejemplo cuáles son obligatorios y qué valores admiten.
+
+El modelo deberá distinguir entre el **nombre de la acción** y el **nombre del estado de destino**: «Iniciar trabajo» podría
+llevar a «En curso», aunque ambos nombres sean distintos. Seleccionará el identificador devuelto por Jira para la acción que
+corresponda a la petición.
+
+- Si hay varias transiciones que podrían satisfacerla, se mostrarán las opciones y se pedirá aclaración.
+- Si el destino no es accesible mediante una transición disponible, se explicará la limitación. No se inventará un ID ni se
+  encadenarán otras transiciones sin indicarlo y obtener la autorización correspondiente.
+- Si no se devuelven transiciones, no se concluirá automáticamente que el estado es definitivo: también pueden intervenir
+  permisos o condiciones del flujo.
+
+#### Datos que puede exigir el cambio de estado
+
+Una transición puede requerir algo más que elegir un destino. Por ejemplo, al resolver un ticket el flujo podría pedir una
+**resolución**, que describe el motivo del cierre, o el valor de un campo personalizado.
+
+La resolución no es lo mismo que el estado: un ticket puede quedar en un estado de cierre por distintos motivos. El plugin
+no asignará ni borrará `resolution` por suposición al cerrar o reabrir; seguirá los requisitos reales de la transición y lo
+solicitado por el usuario.
+
+Si falta un dato obligatorio, el modelo lo pedirá antes de preparar el cambio, salvo que exista un valor predeterminado
+documentado y aplicable. Se validarán los tipos y opciones disponibles. La información del formulario ayuda a preparar la
+petición, pero Jira puede aplicar validaciones adicionales al ejecutarla.
+
+#### Preparación, autorización y ejecución
+
+1. **Consultar el ticket y las transiciones actuales**, con la cuenta seleccionada, para conocer el estado y los requisitos reales.
+2. **Preparar mediante `jira_transition_prepare`**, indicando `expectedUpdated`, el `transitionId` obtenido de Jira y los campos
+   adicionales que correspondan. Comprobar `readOnly`, proyectos restringidos y campos restringidos, también si estos últimos
+   se modifican dentro de la transición.
+3. **Mostrar la propuesta:** estado actual, nombre de la transición, estado de destino, campos que cambiarán y efectos conocidos.
+   Preparar no ejecuta la transición.
+4. **Aplicar mediante `jira_change_apply`**, con los permisos de escritura y la autorización correspondientes. Revalidar que
+   el ticket y la propuesta siguen siendo aplicables y que la transición continúa disponible; si ha cambiado algo relevante,
+   preparar una propuesta nueva.
+5. **Consultar el ticket después de ejecutar** y comunicar el estado que realmente devuelve Jira. No afirmar que se ha cambiado
+   sólo porque se haya preparado la propuesta.
+
+El cuerpo de una petición aprobada a `POST /rest/api/3/issue/{issueIdOrKey}/transitions` podría ser:
 
 ```json
 {
@@ -1596,12 +1792,32 @@ Ejemplo de payload Jira:
 }
 ```
 
-Ni `31` ni `1` son universales. El workflow puede ejecutar automatizaciones, notificaciones y postfunciones no completamente
-describibles por la API. No prometer que una transición sea reversible ni que cambiar un campo `resolution` sea siempre correcto.
+En este ejemplo, `transition.id: "31"` selecciona una transición disponible y `resolution.id: "1"` aporta una opción de
+resolución válida para ella. Ambos identificadores son ilustrativos y deben obtenerse del Jira correspondiente. Si la
+transición no requiere ni admite esa modificación, no se incluirá ese campo.
+
+#### Efectos adicionales y límites
+
+El flujo puede ejecutar acciones automáticas al aplicar una transición, como enviar notificaciones, actualizar otros campos o
+activar reglas de automatización. Algunas se conocen por la configuración disponible; otras no se pueden describir por completo
+con esta consulta. La propuesta advertirá de esa posibilidad sin prometer que se conocen todos los efectos.
+
+Tampoco se garantizará que una transición sea reversible: volver al estado anterior puede requerir otra acción, permisos o
+datos, y no deshace necesariamente las notificaciones o automatizaciones ya ejecutadas. Si la petición queda sin respuesta
+concluyente, se comprobará el resultado antes de intentar otra ejecución, conforme al tratamiento de escrituras inciertas.
 
 ### 5.8. Resultados y errores
 
-Formato lógico común, serializado como JSON en el contenido de la herramienta:
+Todas las herramientas utilizarán una estructura de respuesta común para que el modelo pueda distinguir qué se ha obtenido,
+con qué cuenta y si la operación ha terminado correctamente. El plugin convertirá las respuestas de Jira a esta estructura,
+en lugar de entregar al modelo respuestas HTTP sin tratar o mensajes técnicos difíciles de interpretar.
+
+La estructura se devolverá como JSON en el contenido de la herramienta. El modelo la utilizará para explicar el resultado al
+usuario, sin que este tenga que interpretar el JSON ni conocer los códigos internos.
+
+#### Respuesta de una operación correcta
+
+Por ejemplo, una consulta de ticket podría devolver:
 
 ```json
 {
@@ -1625,8 +1841,69 @@ Formato lógico común, serializado como JSON en el contenido de la herramienta:
 }
 ```
 
-Campos mínimos de error: `code`, mensaje seguro, `retryable`, cuenta, identificador de petición y, cuando proceda,
-`retryAfterSeconds` y errores de validación por campo saneados.
+Los campos comunes significan:
+
+| Campo | Significado |
+| --- | --- |
+| `ok` | Indica si la operación solicitada a esa herramienta terminó correctamente. No significa por sí solo que se haya modificado Jira. |
+| `account` | Alias de la cuenta utilizada, para no confundir resultados de distintos sitios o identidades. |
+| `data` | Resultado propio de la herramienta: un ticket, una página de comentarios, una propuesta o el recibo de un cambio, por ejemplo. |
+| `warnings` | Advertencias que el modelo debe comunicar cuando sean relevantes, aunque la operación haya terminado correctamente. Una lista vacía indica que no hay advertencias. |
+| `meta.requestId` | Identificador de la ejecución o petición que permite relacionar el resultado con los registros de diagnóstico del plugin. No es el identificador del ticket. |
+| `meta.truncated` | Indica si se ha recortado contenido por límites de tamaño. Si es `true`, no se presentará la salida como completa. |
+| `meta.untrustedContent` | Advierte de que el resultado puede contener información externa de Jira, que debe tratarse como datos y no como instrucciones para el modelo. No sustituye los controles de seguridad. |
+
+Por ejemplo, `ok: true` en `jira_comment_prepare` significa que se ha preparado una propuesta, **no que el comentario se haya
+publicado**. El modelo deberá indicar «propuesta preparada» y esperar a la aplicación autorizada. Sólo confirmará una escritura
+cuando el resultado de `jira_change_apply` y su comprobación permitan afirmarlo.
+
+Las advertencias tampoco convierten una operación incompleta en un éxito total. Si se ha recortado una descripción, se
+indicará; si falta información para revisar íntegramente un cambio, no se autorizará su aplicación con esa vista incompleta.
+
+#### Respuesta cuando no se puede completar la operación
+
+Los fallos controlados del plugin se devolverán con `ok: false` y un objeto `error`. Se conservarán la cuenta, el identificador
+de petición y los metadatos aplicables. Por ejemplo:
+
+```json
+{
+  "ok": false,
+  "account": "trabajo",
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "La prioridad seleccionada no es válida para este ticket. Consulta sus opciones y prepara otra propuesta.",
+    "retryable": false,
+    "fieldErrors": {
+      "priority": "La opción indicada no está disponible."
+    }
+  },
+  "warnings": [],
+  "meta": {
+    "requestId": "req-local-124",
+    "truncated": false,
+    "untrustedContent": true
+  }
+}
+```
+
+En `error`:
+
+- **`code`** identifica el tipo de problema mediante un nombre estable que el modelo y las pruebas pueden reconocer.
+- **`message`** explica qué ha ocurrido y qué puede hacerse para resolverlo. No incluirá tokens, cabeceras de autorización,
+  rutas de secretos ni detalles internos innecesarios.
+- **`retryable`** indica si el fallo permite un nuevo intento bajo la política de reintentos aplicable. No autoriza por sí
+  solo a repetir una escritura, eludir una denegación o insistir indefinidamente. En el ejemplo es `false`: antes de volver a
+  intentarlo hay que corregir el valor y preparar otra propuesta.
+- **`retryAfterSeconds`**, cuando proceda, indica cuánto esperar antes de un nuevo intento, por ejemplo si Jira limita
+  temporalmente el número de peticiones.
+- **`fieldErrors`**, cuando proceda, relaciona los identificadores de campos con explicaciones seguras de sus errores. No se
+  copiará sin revisión el cuerpo completo de error recibido de Jira.
+
+#### Tipos de error y comportamiento esperado
+
+Algunos códigos se originan en las validaciones locales; otros traducen una respuesta HTTP de Jira, como `401` por problemas
+de autenticación o `403` por acceso denegado. Un código HTTP no siempre permite conocer la causa exacta: un `404`, por ejemplo,
+puede ocultar un ticket al que la cuenta no tiene acceso. El plugin explicará lo que se sabe sin inventar un diagnóstico.
 
 | Código del plugin                               | Situación                                                                                      | Comportamiento                                                                                 |
 |-------------------------------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
@@ -1645,16 +1922,47 @@ Campos mínimos de error: `code`, mensaje seguro, `retryable`, cuenta, identific
 | `CAPABILITY_NOT_SUPPORTED`                      | Audiencia JSM solicitada en un ticket no compatible                                            | No publicar por una API alternativa ni degradar a comentario ordinario.                        |
 | `MENTION_UNRESOLVED` / `MENTION_AMBIGUOUS`      | No se ha identificado de forma válida y unívoca a la persona solicitada                        | No publicar; solicitar aclaración o revisar acceso a la búsqueda de usuarios.                  |
 | `MENTION_NOT_ALLOWED` / `MENTION_NOT_SUPPORTED` | Mención no autorizada, no verificable o no admitida por la combinación de endpoint e identidad | No publicar como texto ni cambiar la audiencia; explicar la limitación o el permiso que falta. |
+| `FORMAT_INVALID` | Formato desconocido, estructura Markdown inválida para el contrato o límites de complejidad excedidos | Explicar el problema y pedir un contenido corregido; no interpretar como texto normal automáticamente. |
+| `FORMAT_NOT_SUPPORTED` | Un elemento enriquecido no se puede representar en el destino o queda fuera del conjunto admitido | No publicar; describir la limitación y proponer una alternativa que requerirá aceptación y una nueva propuesta. |
 | `FILE_ACCESS_DENIED` / `FILE_CHANGED`           | Ruta no autorizada o contenido distinto del aprobado                                           | No subir; resolver permisos o preparar otra propuesta.                                         |
 | `ATTACHMENT_TOO_LARGE`                          | Excede política local o límite del sitio                                                       | Reducir el fichero; no partirlo ni publicarlo por otro canal sin autorización.                 |
 | `TRANSFER_INCOMPLETE` / `PARTIAL_UPLOAD`        | Descarga incompleta o lote parcialmente confirmado                                             | Informar qué se completó y no repetir el lote completo.                                        |
 
+#### Escrituras inciertas y resultados parciales
+
+No recibir una respuesta de Jira **no demuestra que el cambio no se haya realizado**. Por ejemplo, el plugin puede enviar un
+comentario, Jira publicarlo y la conexión interrumpirse antes de recibir la confirmación. En ese caso se devolverá
+`WRITE_OUTCOME_UNKNOWN`, no se afirmará éxito ni fracaso definitivo y no se repetirá automáticamente el envío, porque podría
+duplicar el comentario. Se comprobará el estado real siguiendo el procedimiento de reconciliación de la sección 11.4.
+
+Una operación con varios archivos también puede completar sólo parte del trabajo. El resultado conservará qué archivos o
+fases están confirmados, cuáles han fallado y cuáles son inciertos, junto con los recibos disponibles. El modelo comunicará
+esa separación en lugar de decir «todo enviado» o repetir el lote completo. Cualquier continuación respetará la propuesta
+aprobada y las comprobaciones necesarias.
+
+#### Denegaciones de permisos de OpenCode
+
 Las denegaciones y rechazos del sistema de permisos de OpenCode deben propagarse como tales. No atraparlos para convertirlos en un
 resultado «correcto» ni reintentarlos con otro mecanismo.
 
+El formato de error anterior se utilizará para los fallos controlados de la aplicación; no sustituirá la señal de denegación
+de OpenCode. Si el usuario rechaza una escritura, el modelo no intentará realizarla mediante shell, otra cuenta o una petición
+HTTP alternativa.
+
 ### 5.9. Notas internas y respuestas públicas al informador en JSM
 
-El contrato de la herramienta exige `audience`, sin un valor público implícito:
+Jira Service Management permite que el equipo de soporte y el cliente trabajen sobre una misma solicitud, pero no toda la
+conversación debe ser visible para ambos. El plugin debe distinguir entre información de trabajo para el equipo y respuestas
+destinadas al cliente, para no publicar por error contenido interno.
+
+El **informador** es la persona registrada como solicitante en Jira. Un **participante** es otra persona con acceso a esa
+solicitud. Un **agente de soporte** es un usuario autorizado de JSM para atenderla; aquí «agente» se refiere al rol de Jira,
+no a un agente de IA de OpenCode. El autor del comentario será siempre la identidad de la cuenta de conexión utilizada,
+no el modelo ni la persona a la que se responde.
+
+#### Elegir quién podrá ver el comentario
+
+El argumento `audience` debe quedar indicado expresamente al preparar el comentario. No habrá un valor público por defecto:
 
 | Audiencia  | Implementación                                          | Destinatarios/visibilidad                                                        |
 |------------|---------------------------------------------------------|----------------------------------------------------------------------------------|
@@ -1666,7 +1974,39 @@ Si el usuario pide «comentar» sin indicar audiencia y no hay intención inequ�
 informador» sí expresan intenciones distintas. Nunca transformar una solicitud interna en pública para sortear un error de
 permisos.
 
-Ejemplo de preparación de respuesta pública:
+Por ejemplo:
+
+- «Deja una nota interna con el diagnóstico» selecciona `internal`.
+- «Responde al cliente que hemos reproducido el error» selecciona `public`.
+- «Añade este comentario», sin contexto suficiente, requiere preguntar si es una nota interna o una respuesta pública.
+
+Una respuesta pública puede verla el informador y otras personas con acceso a la solicitud; no es un mensaje privado dirigido
+exclusivamente al informador ni una publicación accesible a todo Internet. Una nota interna no se mostrará al informador en
+su rol de cliente del portal, aunque esa misma persona podría tener otros roles de acceso en Jira.
+
+El texto enriquecido y las menciones a personas seguirán el contrato y las validaciones de la sección 5.6, también para comentarios con adjuntos.
+
+#### Comprobaciones antes de preparar la respuesta
+
+El plugin deberá:
+
+1. **Seleccionar la cuenta y comprobar las restricciones locales.** No preparar escrituras si `readOnly` lo impide ni operar
+   sobre un proyecto incluido en `restrictedProjects`.
+2. **Comprobar que la cuenta tiene habilitado JSM** mediante `serviceManagement.enabled` y consultar la solicitud con la API
+   específica. Esa opción sólo habilita la función del plugin: no concede permisos ni demuestra que el ticket sea una
+   solicitud JSM accesible. No bastará con deducirlo por el tipo de proyecto.
+3. **Obtener el informador y el contexto necesario**, sin recopilar datos personales que no hagan falta para la operación.
+4. **Validar la identidad que publica y la audiencia solicitada.** Una cuenta con acceso sólo como cliente no puede publicar
+   notas internas. Los permisos de lectura de un ticket tampoco garantizan permiso para comentar.
+5. **Preparar una propuesta inmutable**, con cuenta, sitio, ticket, audiencia, endpoint y contenido final, vinculada a la
+   versión consultada mediante `expectedUpdated`. Incluir los datos pertinentes en el hash y la revisión.
+
+Si la cuenta no dispone de permisos o scopes suficientes, se explicará el impedimento. No se utilizará otra cuenta ni se
+cambiará la visibilidad como alternativa automática.
+
+#### Ejemplo: preparar y publicar una respuesta pública
+
+Ante «responde al cliente de IK-123 con este mensaje», el modelo solicitaría `jira_comment_prepare` con:
 
 ```json
 {
@@ -1678,7 +2018,12 @@ Ejemplo de preparación de respuesta pública:
 }
 ```
 
-Payload final enviado a `POST /rest/servicedeskapi/request/IK-123/comment`:
+La herramienta devolverá una propuesta, no un comentario ya publicado. La revisión mostrará claramente:
+
+> RESPUESTA PÚBLICA — visible al informador y participantes autorizados.
+
+Después de aplicar la propuesta mediante `jira_change_apply` y obtener la autorización correspondiente, el cuerpo enviado a
+`POST /rest/servicedeskapi/request/IK-123/comment` será:
 
 ```json
 {
@@ -1687,94 +2032,192 @@ Payload final enviado a `POST /rest/servicedeskapi/request/IK-123/comment`:
 }
 ```
 
-Para una nota interna, el mismo endpoint recibe `public: false`. En ambos casos `body` es un **string**, no el documento ADF de
-Platform. Normalizar/validar su formato según JSM y no prometer compatibilidad completa con Markdown.
+El plugin traduce `audience: "public"` a `public: true`. Para una nota interna, utilizará el mismo endpoint con
+`public: false` y mostrará antes de aprobar:
 
-Las menciones a personas son obligatorias también en estas dos modalidades y en comentarios JSM con adjuntos. Si se solicita
-`@usuario`, se resolverá y validará mediante el flujo de la sección 5.6, se construirá su representación específica de JSM y se
-incluirán las identidades en la propuesta. No se interpretará la restricción de formato de `body` como una razón para dejar las
-menciones fuera de la primera entrega. Tampoco se añadirá a la persona como participante ni se cambiará `public` para facilitar la
-mención.
+> NOTA INTERNA — no visible al cliente.
 
-Durante la preparación:
+En ambos casos `body` es una cadena de texto, no un documento ADF. Los argumentos `account`, `issueKey` y `expectedUpdated`
+sirven para seleccionar la conexión, construir la ruta y comprobar la propuesta; no se añaden como campos de ese cuerpo.
 
-1. Verificar que el perfil habilita Service Management y que el ticket es una solicitud JSM accesible. No deducirlo sólo del tipo
-   de proyecto.
-2. Obtener el informador y el contexto de la solicitud, minimizando datos personales. El autor será el usuario del token, no el
-   informador ni el modelo.
-3. Validar la capacidad de la identidad: una cuenta sólo cliente puede publicar comentarios públicos, no notas internas. Un 403 no
-   autoriza a cambiar la audiencia.
-4. Fijar audiencia, endpoint, texto, referencia del informador e identidades y posiciones de las menciones, si las hay, en la
-   propuesta. Incluirlos junto con el contenido final en su hash y revisión.
-5. Mostrar «NOTA INTERNA — no visible al cliente» o «RESPUESTA PÚBLICA — visible al informador y participantes autorizados» antes
-   de aprobar.
-6. Tras aplicar, guardar ID y audiencia devuelta; verificar la publicación con el endpoint adecuado.
+Antes de enviar, se revalidará la propuesta para no aplicar contenido distinto del aprobado ni ignorar cambios relevantes
+en la solicitud. Tras publicar, se guardarán el identificador del comentario y la audiencia devuelta por JSM, y se comprobará
+su existencia mediante la API específica. Sólo entonces se confirmará la publicación al usuario; una preparación correcta no
+es una escritura confirmada.
 
-Para listar, mapear `audience` a los filtros `public`/`internal` de JSM y conservar la audiencia de cada comentario. Su paginación
-usa `start`/`limit` y `isLastPage`, no `startAt` ni `nextPageToken`. Un cliente sólo recibe comentarios públicos; una respuesta
-vacía puede deberse a restricciones y no demuestra que no existan notas internas. No recurrir a Platform para eludir esa
-restricción.
+#### Consultar notas y respuestas existentes
+
+`jira_comments_list` permitirá pedir notas internas o respuestas públicas mediante `audience`. El plugin traducirá esa
+selección a los filtros `internal` y `public` de la API de JSM y conservará la audiencia de cada comentario en el resultado.
+No mezclará ambas clases sin indicar cuál corresponde a cada comentario.
+
+Los resultados se obtienen por páginas. En esta API, `start` indica desde qué posición se consulta y `limit` el tamaño
+solicitado; `isLastPage` indica si se ha llegado al final. Son los nombres específicos de JSM, distintos de la paginación de
+otras operaciones de Jira; el plugin los adaptará al cursor común de sus herramientas.
+
+Una cuenta que actúe sólo como cliente recibe comentarios públicos. Una respuesta vacía al buscar notas internas no demuestra
+que no existan: puede deberse a restricciones de acceso. No se recurrirá a la API general de Jira para eludirlas.
+
+#### Publicar una respuesta no garantiza el envío de correo
 
 **Publicación no equivale a entrega de email.** El plugin confirma que el comentario público existe, pero los avisos al informador
 dependen de las notificaciones de cliente, preferencias, automatizaciones y estado del destinatario. No usar el endpoint genérico
 de notificación Jira como sustituto ni modificar suscripciones/participantes sin una operación de alcance y aprobación separados.
 Informar `published: true` y, si no se dispone de prueba, `notificationDelivery: "unknown"`.
 
+La respuesta al usuario deberá distinguir ambos hechos: por ejemplo, «Respuesta pública publicada; no se ha comprobado la
+entrega de la notificación por correo». No afirmará que el cliente ha sido avisado sólo porque Jira haya aceptado el comentario.
+
+#### Solicitudes u operaciones no compatibles
+
 En tickets que no sean solicitudes JSM, devolver `CAPABILITY_NOT_SUPPORTED` al pedir `internal` o `public`. Proponer al usuario un
 comentario ordinario o restringido sólo como alternativa explícita, nunca como semántica equivalente.
 
+Si Jira rechaza la publicación o no se puede confirmar el resultado, aplicar el tratamiento de errores de la sección 5.8:
+no duplicar el mensaje mediante un segundo envío automático ni cambiar de audiencia para sortear el problema.
+
 ### 5.10. Carga y descarga de ficheros adjuntos
 
-#### Listado y pertenencia
+Los adjuntos permiten intercambiar archivos entre el entorno donde se ejecuta el plugin y un ticket de Jira. Se distinguirán
+tres operaciones, porque no todas tienen los mismos efectos ni requieren los mismos permisos:
 
-Listar metadata antes de descargar: ID, nombre, tamaño, MIME, autor/fecha mínimos y audiencia cuando pueda verificarse. Para
-Platform, solicitar `attachment` al consultar el ticket; para JSM, usar el listado de adjuntos de la solicitud y su paginación.
-Verificar que cada `attachmentId` pertenece a la cuenta y al ticket indicado: conocer un ID de adjunto no debe saltarse
-`restrictedProjects`.
+| Operación | Herramienta | Efecto |
+| --- | --- | --- |
+| Listar | `jira_attachments_list` | Consultar qué archivos están disponibles, sin descargar su contenido. |
+| Descargar | `jira_attachment_download` | Copiar un adjunto de Jira a un archivo local del servidor de OpenCode. No modifica Jira, pero escribe en el disco local. |
+| Cargar | `jira_attachment_upload_prepare` y después `jira_change_apply` | Preparar y autorizar el envío de archivos locales a Jira. Es una modificación remota y una salida de datos. |
 
-#### Descarga
+Por ejemplo, «lista los adjuntos» no autoriza a leerlos, y «descarga el log» no autoriza a enviarlo al proveedor del modelo.
+Descargar, analizar y publicar son acciones diferentes.
 
-1. Comprobar `jira.read` sobre el ticket y `jira.download` sobre cuenta/ticket/adjunto/destino.
-2. Verificar pertenencia, acceso y tamaño anunciado; aplicar también un límite real durante el streaming.
-3. Resolver el destino dentro de `downloadDir`; sanear el nombre y no confiar en `filename` o `Content-Disposition` como ruta.
-4. Comprobar explícitamente permisos OpenCode de `edit` y, cuando corresponda, `external_directory` para la ruta canónica. Una
-   herramienta propia que usa `fs` no hereda automáticamente las comprobaciones de la herramienta incorporada de edición.
-5. Descargar a un fichero temporal privado, sin sobrescribir archivos existentes, calculando tamaño y SHA-256.
-6. Tras completar y validar, publicar el fichero local mediante una operación sin sobrescritura y devolver ruta relativa, tamaño,
-   hash y origen. Una cancelación limpia sólo el temporal creado por esa transferencia.
+#### Dónde están los archivos y qué límites se aplican
 
-Preferir en Platform `attachment/content/{id}?redirect=false`, con respuesta binaria y sin redirección automática. JSM puede
-responder `303`: el módulo de transferencias debe manejarla manualmente, limitar saltos y validar HTTPS, host y ruta contra una
-allowlist de medios Atlassian aprobada en el despliegue. Si se usa un enlace firmado de medios, no reenviar Authorization, cookies
-o headers Jira a ese host ni devolver la URL firmada al modelo. No aceptar redirecciones a hosts arbitrarios/privados ni reducir
-TLS. Si no se puede validar el destino o usar una descarga directa compatible con los permisos, fallar de forma segura.
+Las rutas son del **entorno donde se ejecuta el servidor de OpenCode**. Si está en el ordenador del usuario, serán archivos de
+ese ordenador; si está en una máquina remota o un contenedor, no se podrá cargar directamente un archivo que sólo exista en el
+PC del cliente. Primero habrá que transferirlo al servidor por un canal autorizado.
 
-El límite JSON de `http.maxResponseBytes` no se aplica como límite de fichero: usar los límites de `attachments`, un timeout de
-transferencia propio y `Accept` apropiado para binario. No parsear PDFs, imágenes, ZIP o ejecutables durante la descarga ni
-añadirlos automáticamente al contexto del modelo. Descargar y leer/analizar son acciones diferentes.
+Las opciones de `attachments` de la sección 4.4 delimitan las transferencias:
 
-#### Carga Jira Platform
+- **`uploadRoots`:** carpetas desde las que se permite cargar archivos; por ejemplo, `./exports`. No se aceptarán rutas
+  arbitrarias elegidas por el modelo fuera de esas carpetas.
+- **`downloadDir`:** carpeta donde se guardarán las descargas, por ejemplo `.issuekeeper/downloads`.
+- **`maxFileBytes`, `maxBatchBytes` y `maxFilesPerUpload`:** límites por archivo, por lote y por número de archivos.
+- **`transferTimeoutMs`:** tiempo máximo de transferencia; puede ser diferente del de una consulta de datos.
+- **`overwrite: false`:** no reemplazar archivos locales existentes.
 
-- Preparar con `jira_attachment_upload_prepare`, `audience: "ticket"`, cuenta, código y rutas locales autorizadas.
-- Validar `attachment/meta`: adjuntos habilitados y tamaño máximo. Aplicar el menor entre límite del sitio y política del plugin.
-- Enviar `multipart/form-data` a `/rest/api/3/issue/{issueIdOrKey}/attachments`, con una o más partes llamadas `file` y
-  `X-Atlassian-Token: no-check`.
-- Dejar que la biblioteca multipart construya el boundary; no fijar `Content-Type: application/json` ni un multipart sin boundary.
-- La respuesta ordinaria es `200` con un array de metadata; conservar los IDs retornados y comprobar pertenencia.
-- Esta API no define por sí misma un adjunto «interno» o «público de portal». Si se solicita esa semántica en JSM, usar el flujo
-  JSM, no cargar primero por Platform y asumir que después se ocultará.
+También se respetarán los límites y permisos del sitio Jira; se aplicará siempre el límite más restrictivo que corresponda.
+`http.maxResponseBytes` limita las respuestas de datos JSON, no el tamaño de los adjuntos. El contenido de los archivos se
+transferirá por bloques, sin cargar necesariamente todo el fichero en memoria; esto es lo que se denomina *streaming*.
 
-#### Carga JSM con audiencia y comentario
+#### Consultar los adjuntos y comprobar a qué ticket pertenecen
 
-Después de preparar localmente y obtener aprobación, ejecutar:
+Antes de descargar, el plugin consultará los datos del adjunto: identificador (`attachmentId`), nombre, tamaño, tipo de
+contenido —MIME, por ejemplo `text/plain`—, autor y fecha mínimos, y audiencia si puede determinarla. Estos datos describen el
+archivo, pero no son su contenido.
 
-1. Resolver el `serviceDeskId` de la solicitud, no aceptar uno arbitrario elegido por el modelo.
-2. Cargar los bytes a `/rest/servicedeskapi/servicedesk/{serviceDeskId}/attachTemporaryFile` mediante multipart `file` y
-   `X-Atlassian-Token: no-check`. Añadir cabeceras de API experimental únicamente si el contrato de la versión desplegada las
-   exige.
-3. Conservar los `temporaryAttachmentId` devueltos dentro del servidor, vinculados a propuesta, identidad y service desk.
-4. Publicar en `/rest/servicedeskapi/request/{issueIdOrKey}/attachment` usando esos IDs y `public` explícito. Puede incluirse un
-   comentario en la misma operación:
+En Jira Platform se obtiene la lista solicitando el campo `attachment` del ticket. En JSM se utilizará el listado de
+adjuntos de la solicitud, con su paginación y reglas de visibilidad. No se dará por hecho que ambas APIs devuelven los mismos
+archivos para cualquier identidad.
+
+Conocer un `attachmentId` no será suficiente para descargarlo. El plugin verificará que pertenece al ticket y cuenta
+indicados, y comprobará el proyecto real frente a `restrictedProjects`. Si no se puede conocer su visibilidad, se indicará
+como desconocida; no se deducirá que un archivo es interno por su nombre.
+
+#### Descargar un archivo de forma segura
+
+El proceso de `jira_attachment_download` será:
+
+1. **Comprobar el acceso remoto:** permisos `jira.read` sobre el ticket y `jira.download` sobre la cuenta, el ticket, el
+   adjunto y el destino, además de pertenencia y restricciones de proyecto.
+2. **Comprobar el tamaño:** rechazar archivos que superen los límites conocidos y contar los bytes recibidos durante la
+   transferencia. Un tamaño anunciado por el servidor no sustituye ese control real.
+3. **Preparar el destino:** resolver el nombre dentro de `downloadDir` y eliminar o rechazar componentes peligrosos, como
+   `../`. Ni el nombre recibido de Jira ni la cabecera HTTP `Content-Disposition`, que puede sugerir un nombre, podrán
+   convertirse directamente en una ruta de escritura.
+4. **Autorizar la escritura local:** comprobar `edit` y, cuando proceda, `external_directory` para la ruta real validada. El
+   plugin debe solicitar estos controles expresamente: usar `fs`, la biblioteca de archivos del runtime, no hereda los
+   permisos de la herramienta de edición incorporada de OpenCode.
+5. **Escribir en un temporal privado:** guardar los bloques recibidos en un archivo provisional, calculando tamaño y
+   SHA-256, una huella del contenido que permite comprobar si dos copias contienen los mismos bytes.
+6. **Finalizar y devolver un recibo:** sólo tras completar las comprobaciones se moverá el contenido al archivo definitivo
+   mediante una operación que no sobrescriba otro archivo. El resultado incluirá ruta relativa, tamaño, hash y origen.
+
+Si la transferencia se interrumpe o se cancela, no se presentará un archivo parcial como descarga terminada. Se eliminará
+únicamente el temporal creado para esa transferencia, no archivos previos ni descargas correctas.
+
+La respuesta se tratará como contenido binario, no como JSON, utilizando la cabecera `Accept` apropiada para la operación.
+El plugin no abrirá, analizará, ejecutará ni descomprimirá automáticamente el archivo, ni lo añadirá al contexto del modelo.
+
+#### Qué hacer si Jira redirige la descarga
+
+Una redirección HTTP indica que el contenido debe recuperarse desde otra dirección. Para Jira Platform se preferirá
+`/rest/api/3/attachment/content/{id}?redirect=false`, que solicita la descarga sin redirección automática. JSM puede devolver
+una respuesta `303` que remita a un servicio de archivos.
+
+El módulo de transferencias deberá controlar esos saltos manualmente y limitar su número. Sólo aceptará direcciones HTTPS
+cuyo servidor y ruta pertenezcan a una lista de destinos de medios Atlassian autorizados en el despliegue. No aceptará
+destinos arbitrarios o de redes privadas, ni desactivará la validación TLS para hacer funcionar la descarga.
+
+Algunos destinos utilizan una **URL firmada**, un enlace temporal que permite acceder al archivo. Si se usa, no se reenviarán
+las credenciales, cookies o cabeceras de Jira al servidor de medios, ni se expondrá ese enlace al modelo. Si no se puede
+validar el destino o utilizar una descarga directa compatible con los permisos, se detendrá la operación explicando el motivo.
+
+#### Preparar una carga antes de enviar datos a Jira
+
+El usuario podrá pedir, por ejemplo, «prepara adjuntar `exports/diagnostico.log` a IK-123 como archivo interno». El modelo
+seleccionará la cuenta y la audiencia y solicitará `jira_attachment_upload_prepare`.
+
+Durante la preparación se validarán el ticket, la cuenta, los límites, las rutas de origen y el permiso para leer los
+archivos. El plugin creará una **copia privada de preparación** (*staging*): una copia local cuyo contenido se mantiene fijo
+para la propuesta. Así, si el archivo original cambia mientras el usuario revisa, no se enviarán bytes diferentes de los
+que se han preparado y aprobado.
+
+La propuesta mostrará cuenta, ticket, nombres de publicación, tamaños, hashes, audiencia y comentario asociado, si lo hay.
+No modificará Jira ni realizará ninguna carga remota. `readOnly: true` bloqueará las cargas, aunque la cuenta tenga permiso
+para adjuntar en Jira.
+
+Tras aprobar, `jira_change_apply` enviará exactamente las copias preparadas utilizando el flujo Platform o JSM que corresponda.
+
+#### Cargar archivos mediante Jira Platform
+
+Este flujo se utilizará con `audience: "ticket"`, es decir, con la visibilidad ordinaria del ticket:
+
+1. Consultar `GET /rest/api/3/attachment/meta` para comprobar que los adjuntos están habilitados y conocer el tamaño máximo
+   del sitio, aplicando también los límites del plugin.
+2. Después de la preparación y autorización, enviar los archivos a
+   `POST /rest/api/3/issue/{issueIdOrKey}/attachments`.
+3. Utilizar `multipart/form-data`, un formato HTTP que permite enviar archivos como partes separadas de una misma petición.
+   Cada archivo se incluirá en una parte llamada `file`, con la cabecera `X-Atlassian-Token: no-check` que exige la operación.
+4. Dejar que la biblioteca de envío genere el *boundary*, el separador entre partes del mensaje, y su cabecera de contenido.
+   No fijar `Content-Type: application/json` ni construir un multipart sin ese separador.
+5. Conservar los IDs de los adjuntos devueltos —la respuesta ordinaria es HTTP `200` con una lista de sus datos— y comprobar
+   que pertenecen al ticket esperado.
+
+Esta operación no define por sí sola un adjunto «interno» o «público de portal». Para esas audiencias se utilizará el flujo
+específico de JSM; no se cargará primero por Platform suponiendo que después se podrá ocultar.
+
+#### Cargar archivos en JSM: envío temporal y publicación
+
+JSM utiliza dos fases remotas. Primero recibe los archivos de forma temporal en el **service desk**, el servicio de soporte
+al que pertenece la solicitud. Después los incorpora a la solicitud concreta con visibilidad interna o pública.
+
+**Las dos fases transmiten o modifican datos y requieren la aprobación de `jira_change_apply`.** Que la primera carga se
+llame temporal no significa que se pueda realizar durante la preparación ni antes de autorizar el envío.
+
+Una vez obtenida la aprobación:
+
+1. **Validar el servicio de destino:** obtener y comprobar el `serviceDeskId` a partir de la solicitud, no de un identificador
+   arbitrario proporcionado por el modelo.
+2. **Enviar los archivos temporales:** utilizar
+   `POST /rest/servicedeskapi/servicedesk/{serviceDeskId}/attachTemporaryFile`, con partes multipart `file` y
+   `X-Atlassian-Token: no-check`. Las cabeceras de API experimental sólo se añadirán si las exige el contrato de la versión
+   desplegada.
+3. **Guardar las referencias recibidas:** conservar cada `temporaryAttachmentId` dentro del servidor, asociado a la propuesta,
+   la identidad que cargó el archivo y el service desk. El modelo no elegirá ni aportará esos identificadores.
+4. **Publicar en la solicitud:** enviar a `POST /rest/servicedeskapi/request/{issueIdOrKey}/attachment` las referencias
+   temporales y un valor `public` explícito, con un comentario opcional.
+
+Por ejemplo, esta segunda petición publica los archivos como internos e incorpora un comentario:
 
 ```json
 {
@@ -1788,54 +2231,70 @@ Después de preparar localmente y obtener aprobación, ejecutar:
 }
 ```
 
-`public` controla la visibilidad del comentario y los adjuntos creados por esta operación. No crear además otro comentario con
-`jira_comment_prepare` para el mismo mensaje, pues lo duplicaría. Una respuesta al informador con archivos usa el mismo flujo con
-`public: true`, tras revisar que ninguno contiene información interna.
+`temporaryAttachmentIds` relaciona los archivos ya recibidos por JSM; `public: false` los publica como internos, y
+`additionalComment.body` añade el comentario en la misma operación. Para responder públicamente con archivos se utilizará
+`public: true`, tras comprobar que ninguno contiene información interna. Ese valor controla la visibilidad tanto del
+comentario como de los adjuntos publicados.
 
-Si el comentario contiene menciones, utilizar las referencias `mentions` preparadas y el adaptador de JSM para construir
-`additionalComment.body`. Las personas mencionadas se revisarán junto con los ficheros y la audiencia. No publicar un segundo
-comentario para añadir menciones que se hayan omitido en la operación con adjuntos; su funcionamiento conjunto deberá validarse
-antes de dar por completada la entrega.
+No se publicará además el mismo mensaje con `jira_comment_prepare`, porque se duplicaría. El texto enriquecido y las menciones
+seguirán la sección 5.6, quedando su contenido final dentro del plan aprobado. Una identidad sólo cliente podrá publicar
+adjuntos públicos, no archivos internos que requieran permisos de equipo de soporte.
 
-**La preparación no realiza cargas temporales remotas:** subir a un service desk ya transmite datos y es una mutación. Ambas fases
-remotas deben quedar cubiertas por la autorización de `jira_change_apply`. El cliente de JSM sólo puede publicar adjuntos
-públicos; las notas/adjuntos internos requieren la identidad adecuada.
+#### Qué ocurre si una carga se completa sólo en parte
 
-El flujo tiene varias peticiones y no es una transacción global. Guardar el progreso por fase/fichero. Si la carga temporal
-funciona y falla la publicación, informar del estado y reconciliar; si falta una respuesta final, no repetir a ciegas. No afirmar
-éxito porque sólo existan IDs temporales, ni prometer una API de borrado de temporales no documentada. Su ciclo de vida se rige
-por JSM; cualquier reanudación debe revalidar identidad, vigencia de IDs y aprobación.
+Las fases de JSM y el envío de varios archivos no constituyen una única transacción: que falle el último paso no deshace los
+anteriores. El plugin guardará el progreso por archivo y fase.
 
-#### Seguridad de ficheros y fijación de contenido
+Si JSM acepta los temporales pero falla su publicación, se explicará que los datos se han enviado, pero todavía no se ha
+confirmado su incorporación a la solicitud. Si falta una respuesta final, se comprobará el estado antes de repetir nada.
+No se anunciará éxito sólo por disponer de identificadores temporales ni se volverá a enviar todo un lote que pueda estar
+parcialmente publicado.
 
-- Autorizar lectura local antes de abrir los archivos para preparación. Pedir `read` y, cuando proceda, `external_directory`
-  mediante el sistema de permisos de OpenCode.
-- Resolver rutas respecto a la ubicación de sesión validada; aceptar sólo ficheros regulares bajo `uploadRoots`. Rechazar
-  traversal, dispositivos, sockets, enlaces simbólicos que escapen y raíces de secretos/metadatos VCS. Validar la jerarquía y la
-  apertura, no sólo un prefijo textual de ruta.
-- Proteger frente a cambios entre validación y apertura; usar primitivas seguras basadas en descriptores/no-follow disponibles en
-  el sistema y aislamiento del directorio. Un `realpath` seguido de un `open` sin protección no elimina carreras.
-- Copiar los bytes aprobables a un staging privado e inmutable, con tamaño y SHA-256, ligado a propuesta/sesión. Publicar
-  exactamente esa copia al aplicar, no releer una ruta mutable después de la aprobación. Si no se conserva una copia, un hash
-  distinto obliga a preparar y autorizar otra vez.
-- Mostrar nombre de publicación, tamaño, hash, cuenta/ticket, audiencia y comentario asociado. El hash verifica identidad de
-  bytes, **no ausencia de secretos o malware**. Revisar o escanear contenido según política antes de una publicación pública; no
-  enviar el fichero a un escáner externo sin autorización.
-- No aceptar ficheros de credenciales ni leer rutas arbitrarias porque lo ordene un ticket. La carga es una salida de datos a
-  Jira, aunque el contenido no pase por el proveedor del modelo.
-- Mantener ficheros grandes por streaming o copia local acotada, nunca en base64 dentro de argumentos, resultados o logs. No
-  ejecutar ni descomprimir automáticamente; evitar bombas ZIP y cargas activas.
-- No confundir disco del servidor con disco del cliente: si el usuario trabaja con un servidor remoto, debe transferir el fichero
-  al servidor por un canal autorizado antes de prepararlo. La descarga devuelve una ubicación del servidor, no promete un archivo
-  en el ordenador del usuario.
-- Aplicar cuotas de disco y TTL a staging/temporales; limpiar sólo archivos propiedad del plugin. Conservar descargas finalizadas
-  hasta una acción de limpieza autorizada, con el directorio excluido de Git y de instrucciones/contexto automáticos.
+La vigencia y eliminación de los temporales remotos dependen de JSM; no se prometerá una API de borrado que no esté
+documentada. Para reanudar se comprobarán de nuevo la identidad, las referencias temporales vigentes y la aprobación aplicable.
+Los errores y resultados inciertos se comunicarán conforme a la sección 5.8.
+
+#### Protección de las rutas y del contenido aprobado
+
+Antes de abrir un archivo para preparar su carga se comprobará `read` y, cuando corresponda, `external_directory`. Las rutas
+relativas se resolverán desde la ubicación validada de la sesión. Sólo se aceptarán archivos ordinarios dentro de
+`uploadRoots`, no dispositivos, sockets ni rutas de credenciales o metadatos del control de versiones.
+
+La comprobación debe impedir escapes mediante `../` o enlaces simbólicos que conduzcan fuera de las raíces permitidas. No
+basta con comprobar que el nombre empieza por el texto de una carpeta: se validarán la ubicación real y la apertura del
+archivo. Además, habrá que protegerse frente a que un enlace o directorio cambie entre comprobarlo y abrirlo. Se utilizarán
+las primitivas seguras disponibles en el sistema —apertura por descriptores y sin seguimiento indebido de enlaces— y
+directorios aislados; llamar a `realpath` y después a `open` sin más protección no elimina esa carrera.
+
+La copia de preparación estará protegida, vinculada a la propuesta y a la sesión, y no podrá modificarse después de aprobar.
+Se enviará esa copia, no una nueva lectura del archivo original. Si una implementación no conserva la copia y detecta un
+contenido distinto, tendrá que preparar y autorizar una nueva propuesta.
+
+**Un hash identifica bytes; no demuestra que el archivo esté libre de secretos o malware.** Antes de publicar, se revisará o
+escaneará el contenido según la política aplicable, especialmente si será visible para el cliente. No se enviará a un escáner
+externo sin autorización. Tampoco se leerán archivos de credenciales porque lo solicite el contenido de un ticket.
+
+Los archivos grandes se manejarán mediante streaming o copias locales acotadas, no como cadenas base64 dentro de argumentos,
+resultados o registros. No se ejecutarán ni se descomprimirán automáticamente: un archivo comprimido puede contener una
+cantidad de datos desproporcionada o contenido activo peligroso.
+
+#### Conservación y limpieza de archivos locales
+
+El plugin aplicará cuotas de disco y un tiempo máximo de conservación —TTL— a las copias de preparación y temporales.
+La limpieza sólo eliminará archivos que pertenezcan al plugin y a la operación correspondiente.
+
+Las descargas ya finalizadas se conservarán hasta una acción de limpieza autorizada; no se borrarán porque caduque una
+propuesta distinta. El directorio de descargas y el staging se excluirán de Git y de la incorporación automática de archivos
+al contexto del modelo. El recibo indicará dónde está el archivo en el servidor, sin prometer que se ha copiado también al
+ordenador de un cliente remoto.
 
 ## 6. Implementación del plugin
 
 ### 6.1. Preparar el paquete
 
-Desde la raíz del repositorio, crear el directorio propuesto y el manifiesto. Ejemplo inicial:
+Desde la raíz del repositorio, crear el directorio propuesto y el manifiesto `package.json`, que declara la entrada del plugin,
+sus dependencias y los comandos de desarrollo. El siguiente ejemplo incluye el análisis de Markdown y tablas necesario para
+los comentarios enriquecidos de la sección 5.6:
 
 ```json
 {
@@ -1862,25 +2321,60 @@ Desde la raíz del repositorio, crear el directorio propuesto y el manifiesto. E
 	},
 	"dependencies": {
 		"@opencode/plugin": "2.2.5",
+		"remark-gfm": "4.0.1",
+		"remark-parse": "11.0.0",
+		"unified": "11.0.5",
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@types/mdast": "4.0.4",
 		"@types/node": "^22.0.0",
+		"@types/unist": "3.0.3",
 		"typescript": "^5.9.0",
 		"vitest": "^3.0.0"
 	}
 }
 ```
 
-El nombre del paquete es propuesto: comprobar disponibilidad o usar el scope de la organización. `private: true` evita una
-publicación accidental; retirarlo sólo cuando se haya decidido publicar. Los archivos `README.md` y `LICENSE` se crearán durante
-el desarrollo.
+Se mantiene el nombre `@issuekeeper/opencode-jira`. Para publicarlo habrá que comprobar su disponibilidad y disponer del scope
+npm `@issuekeeper`. `private: true` evita una publicación accidental; retirarlo sólo cuando se haya decidido publicar. Los
+archivos `README.md` y `LICENSE` se crearán durante el desarrollo.
 
-Las versiones del SDK y Zod reflejan la consulta realizada; las herramientas de desarrollo son una base propuesta. Resolverlas,
-validar su compatibilidad, actualizar las que corresponda y versionar `package-lock.json`. No usar `latest` flotante en entregas
-reproducibles.
+#### Dependencias de ejecución y de desarrollo
 
-`tsconfig.json` mínimo:
+Las dependencias de ejecución se necesitan cuando OpenCode carga y utiliza el plugin:
+
+| Paquete | Función |
+| --- | --- |
+| `@opencode/plugin` | Integración con OpenCode: definición del plugin, herramientas, permisos y servicios del contexto. |
+| `zod` | Validación de configuración y argumentos durante la ejecución, además de los tipos estáticos de TypeScript. |
+| `unified` | Organizar el procesamiento del contenido mediante un analizador y sus extensiones. |
+| `remark-parse` | Analizar Markdown y producir un árbol de elementos —párrafos, listas, código, etc.— con posiciones en el texto de origen. |
+| `remark-gfm` | Añadir extensiones de GitHub Flavored Markdown, entre ellas las tablas. Su activación no autoriza automáticamente todas sus características. |
+
+El árbol de Markdown se denomina **mdast** y utiliza la estructura común de árboles **unist**. `@types/mdast` y `@types/unist`
+aportan sus definiciones TypeScript y se declaran como dependencias de desarrollo para los módulos que importen esos tipos.
+Las bibliotecas anteriores ya incluyen sus propios tipos; no hace falta añadir paquetes `@types` para ellas. Las demás
+dependencias de desarrollo proporcionan los tipos de Node.js, el compilador TypeScript y el ejecutor de pruebas Vitest.
+
+`core/markdown.ts` utilizará estas bibliotecas para analizar el contenido, pero validará después que sólo contiene los
+elementos admitidos por la sección 5.6. Por ejemplo, no se aceptarán automáticamente listas de tareas o texto tachado sólo
+porque una extensión pueda interpretarlos. Se conservarán las posiciones de origen para validar las menciones y se aplicarán
+los límites de complejidad y seguridad previstos.
+
+Estas bibliotecas no convierten por sí solas el contenido al formato de Jira. La representación común de `core/comment.ts`
+y los adaptadores `jira/adf.ts`, `jira/rich-text.ts` y `jira/mentions.ts` deberán implementarse y probarse. No se necesita
+generar HTML para ese recorrido ni añadir un renderizador HTML como dependencia de este ejemplo.
+
+Las versiones del SDK y Zod reflejan la consulta de referencia; las versiones indicadas de las bibliotecas Markdown y sus tipos
+se han comprobado en npm el **14 de noviembre de 2026**. Esto confirma su publicación, no la compatibilidad de una implementación
+completa. Las herramientas de desarrollo siguen siendo una base propuesta. Instalar las dependencias, validar compilación y
+pruebas, actualizar lo necesario y versionar `package-lock.json` para fijar también las dependencias transitivas. No usar
+`latest` flotante en entregas reproducibles.
+
+#### Configuración de TypeScript
+
+El `tsconfig.json` mínimo sigue siendo válido para los módulos ESM y las bibliotecas seleccionadas:
 
 ```json
 {
@@ -2041,6 +2535,7 @@ export interface ChangeProposal {
 	kind: "fields" | "comment" | "transition" | "upload" | "comment-with-attachments";
 	audience?: "ticket" | "internal" | "public";
 	commentText?: string;
+	commentFormat?: "plain" | "markdown";
 	mentions?: Array<{
 		start: number;
 		end: number;
@@ -2073,6 +2568,11 @@ contendrá las identidades y nombres ya validados por el servidor. Ambos formar�
 contenido final construido para Jira. El hash deberá cubrir la cuenta, el ticket, la audiencia, las personas mencionadas y su
 representación final: cambiar un destinatario no puede conservar la aprobación de otra propuesta.
 
+En cualquier propuesta que publique un comentario, `commentText` conservará el texto original y `commentFormat` el formato
+efectivo, incluido `plain` cuando se haya omitido en la entrada. Se conservará además el contenido final convertido dentro del
+plan de ejecución. Texto, formato, audiencia, menciones y representación final quedarán cubiertos por el hash; cambiar la
+interpretación, el formato de destino o aceptar una alternativa con pérdida de formato exige una propuesta nueva.
+
 **Preparar:**
 
 1. Resolver cuenta y permisos de lectura; denegar si `readOnly`.
@@ -2081,9 +2581,10 @@ representación final: cambiar un destinatario no puede conservar la aprobación
 4. Comprobar que el proyecto no está en `restrictedProjects` y que los campos que se modificarán no están en
    `restrictedUpdateFields`; validar también tipos, valores, visibilidad y transición. No permitir eludir una restricción de campo
    incluyéndolo en el payload de una transición.
-5. Resolver y validar las menciones, si las hay, y construir un plan final del adaptador: payload JSON o manifiesto de carga con
-   copias locales inmutables. Normalizarlo y calcular su hash canónico, incluyendo audiencia, texto y personas mencionadas y
-   hashes de fichero. Los IDs temporales JSM se resolverán durante la aplicación, no los aporta el modelo.
+5. Validar `format`, analizar el Markdown cuando corresponda y resolver las menciones, conservando sus posiciones de origen.
+   Comprobar la compatibilidad del contenido y construir el plan final: payload JSON o manifiesto de carga con copias locales
+   inmutables. Calcular su hash canónico, incluyendo audiencia, texto original, formato, personas mencionadas, contenido final
+   y hashes de fichero. Los IDs temporales JSM se resolverán durante la aplicación, no los aporta el modelo.
 6. Construir el diff legible y advertir de reemplazos, pérdida de formato o notificaciones.
 7. Guardar la propuesta con TTL —diez minutos por defecto— y vínculo a sesión/ubicación/cuenta.
 8. Devolver ID, resumen y expiración. **No modificar Jira ni cargar temporales remotos.** Para adjuntos, preparar puede crear
@@ -2282,6 +2783,8 @@ Mostrar como mínimo:
 - Operación concreta y campos afectados.
 - Valores anteriores/nuevos, o indicación de borrado/reemplazo.
 - Texto completo del comentario dentro de límites revisables y su visibilidad.
+- Formato solicitado y representación legible del resultado convertido, incluidas tablas, listas, enlaces y bloques de código;
+  explicar las diferencias y detener la preparación aplicable si se necesita aceptar una alternativa de formato.
 - Personas mencionadas, con nombre visible y `accountId`, y su representación en el comentario. No permitir sustituirlas después
   de aprobar.
 - En JSM, etiqueta inequívoca de interno/público, informador y alcance de acceso de los participantes, sin prometer entrega de
@@ -2515,6 +3018,10 @@ En la solicitud JSM IK-123 de trabajo, prepara una nota interna:
 En esa solicitud, prepara una nota interna mencionando a Ana García del equipo
 de soporte. Comprueba su identidad y no la añadas como participante.
 
+Prepara una nota interna en IK-123 de trabajo con el título «Diagnóstico»,
+la causa en negrita, una lista numerada de pasos y los logs en un bloque de código.
+Menciona a Ana García para que lo revise y muéstrame el resultado antes de publicar.
+
 Prepara una respuesta pública al informador de IK-123 de trabajo:
 "Estamos analizando su incidencia y le informaremos de los avances".
 
@@ -2676,6 +3183,10 @@ No confirmes éxito ante un resultado desconocido; explica cómo reconciliarlo.
 Para JSM, distingue notas internas de respuestas públicas al informador.
 Si falta audiencia, pregunta; nunca conviertas interno en público por un error.
 No prometas entrega de email por haber publicado un comentario.
+Si se pide formato enriquecido, prepara el contenido con format: markdown;
+si se pide texto literal, usa plain. No envíes ADF ni Markdown sin convertir a JSM.
+Revisa el resultado convertido y sus límites antes de aplicar. Si falta soporte
+para un elemento, explica la alternativa y pide aceptación; no pierdas formato en silencio.
 Para mencionar a alguien, resuelve su identidad con jira_mention_candidates.
 Si hay ambigüedad o no puedes validar la mención para esa audiencia, pregunta
 o explica el impedimento; no inventes IDs ni sustituyas la mención por texto.
@@ -2703,6 +3214,14 @@ del host.
 - JQL: consultas sin exclusiones cuando no hay proyectos restringidos, escape de valores, exclusión de proyectos restringidos y
   manejo de `ORDER BY` mediante parser/generador; comprobar la exclusión con expresiones `OR` y validar los proyectos devueltos.
 - ADF: líneas vacías, CRLF, Unicode, nodos desconocidos y ausencia de conversiones destructivas silenciosas.
+- Formato: `format` omitido equivale a `plain`, asteriscos y símbolos literales sin reinterpretación, rechazo de valores
+  desconocidos y de `format` sin comentario en cargas. Markdown con párrafos, saltos explícitos, negrita, cursiva, encabezados,
+  listas anidadas, enlaces, código, citas y tablas.
+- Conversión enriquecida: estructura común y adaptación por destino, límites de profundidad y tamaño, código conservado como
+  texto y posiciones originales de menciones tras analizar Markdown. Rechazar menciones dentro de código, delimitadores o
+  destinos de enlaces; no crear menciones accidentales al convertir a JSM.
+- Contenido no admitido: HTML, estilos, imágenes remotas incrustadas y enlaces con protocolos no permitidos; el análisis no
+  ejecuta código, abre enlaces ni descarga recursos. Elementos sin equivalencia generan diagnóstico, no una pérdida silenciosa.
 - Menciones: resolución unívoca o petición de aclaración; `@` literal y emails sin conversión automática; posiciones UTF-16 con
   acentos y emojis, límites y solapamientos, varias menciones y menciones repetidas a una persona. Construcción y lectura de nodos
   ADF `mention`, sin pérdida de identidad.
@@ -2713,6 +3232,8 @@ del host.
 - Payloads: etiquetas incrementales, `null`, arrays, campo duplicado entre `fields`/`update`, comentarios/transiciones embebidos
   prohibidos.
 - Propuestas: TTL, hash estable, vínculo de sesión/ubicación, políticas cambiadas y estados de recuperación.
+- Propuestas enriquecidas: cambiar `plain` por `markdown`, las opciones de conversión, la estructura o el payload final
+  invalida la aprobación anterior; las alternativas se aceptan y preparan de nuevo antes de aplicar.
 - Reintentos: máximo de intentos, jitter, `Retry-After`, cancelación y escrituras no repetidas.
 - Salida: JSON válido, campos mínimos, truncamiento explícito y límites de bytes.
 - Audiencia: `ticket`/`internal`/`public` obligatoria en preparación, mapeo correcto a `public`, separación ADF/string y rechazo
@@ -2729,6 +3250,9 @@ Con respuestas simuladas y validadas contra el contrato Jira:
 - Búsqueda mejorada con varias páginas, última página sin token y cursor repetido.
 - `GET issue` con clave canónica distinta por ticket movido.
 - Comentarios paginados por offset, sin asumir que vienen todos dentro de `GET issue`.
+- Comentarios enriquecidos: payload ADF con nodos y atributos del conjunto admitido; JSM con `body` y
+  `additionalComment.body` en el formato específico validado, nunca objetos ADF. Enviar el contenido final aprobado, sin
+  recalcularlo durante la aplicación ni insertar un campo `format` en la petición a Jira.
 - Escrituras `204` sin cuerpo y comentario `201`.
 - 400, 401, 403, 404, 409, 413, 422, 429 y 5xx.
 - HTML inesperado, JSON inválido y stream sobredimensionado sin `Content-Length`.
@@ -2770,6 +3294,9 @@ Simular 429 localmente: no provocar rate limiting deliberadamente contra tenants
   dar esta prueba por superada.
 - Personas con el mismo nombre, sin acceso a la audiencia, identidad inactiva o búsqueda no disponible por scopes/permisos.
   Confirmar que no se publica una mención distinta, no se añade un participante y no cambia la visibilidad para resolver el error.
+- Texto enriquecido: comprobar en Jira cada elemento de la matriz de la sección 5.6 para comentarios Platform, JSM internos,
+  públicos y con adjuntos, también combinados con menciones. Verificar formato e identidades reales, no sólo HTTP `201` o el
+  aspecto de la propuesta en OpenCode. Documentar las limitaciones por combinación y probar la aceptación de alternativas.
 - Ficheros con bytes conocidos: carga/descarga íntegra y verificación de tamaño/hash; errores al exceder límites del sitio o
   política.
 - Comprobar notificaciones en un entorno controlado si se desea validar email, sin equiparar esa prueba a la mera creación del
@@ -2800,6 +3327,9 @@ Nunca grabar tokens en fixtures o snapshots.
   sobrescritura.
 - Petición en lenguaje natural para mencionar a una persona: búsqueda de candidatos, aclaración de homónimos, preparación con
   `mentions`, revisión y aplicación. Rechazo humano o cambio de persona tras aprobar sin publicación no autorizada.
+- Petición de formato en lenguaje natural y contenido Markdown pegado: selección de `format`, conversión, propuesta legible,
+  menciones y aprobación. Un elemento no soportado no se publica hasta aceptar y preparar la alternativa; el código incluido
+  en el comentario no se ejecuta como herramienta.
 
 ### 10.5. Criterios de aceptación
 
@@ -2808,6 +3338,10 @@ Nunca grabar tokens en fixtures o snapshots.
 - [ ] Las búsquedas usan `/search/jql` y paginación correcta.
 - [ ] Los tickets se consultan por código y conservan ID/código canónico.
 - [ ] Se pueden preparar y aplicar atributos, comentarios y transiciones autorizados.
+- [ ] Las herramientas admiten `format: "plain"` y `format: "markdown"`, con `plain` por defecto, para comentarios y
+  comentarios JSM con adjuntos; el contenido enriquecido se prepara, revisa y fija antes de autorizar la publicación.
+- [ ] Existe una matriz comprobada del conjunto enriquecido por API y modalidad; sus limitaciones se explican sin publicar
+  pérdidas de formato silenciosas. Una alternativa necesita aceptación y una nueva propuesta revisable.
 - [ ] Desde la primera entrega de escritura se pueden resolver y publicar menciones reales a personas en comentarios Platform y en
   notas internas, respuestas públicas y comentarios con adjuntos JSM, con prueba de reconocimiento de la identidad en Jira.
 - [ ] Las menciones ambiguas, no autorizadas o no verificables se detienen con un diagnóstico claro; las personas se revisan antes
@@ -2920,20 +3454,23 @@ a medios no validados. La validación real con Jira, identidades agente/cliente 
 modelos queda pendiente de un entorno de pruebas autorizado; véanse los límites e
 instrucciones de instalación del README del paquete.
 
-La resolución de candidatos y el tratamiento de menciones forman parte de los requisitos iniciales de esta guía. La descripción de
-la implementación local disponible no presupone que estas nuevas capacidades ya estén implementadas o validadas.
+La resolución de candidatos, las menciones y los comentarios enriquecidos forman parte de los requisitos iniciales de esta guía.
+La descripción de la implementación local disponible no presupone que estas capacidades ya estén implementadas o validadas.
 
 ### Fase 2 — Escritura controlada
 
 Implementar metadata, ADF y texto JSM, preparación de atributos/comentarios/transiciones/cargas, propuestas inmutables, permisos,
 TTL, auditoría y recibos. Incluir notas internas y respuestas públicas al informador, menciones reales con identidad y audiencia
-validadas, staging local y publicación de adjuntos JSM en dos fases con comentario opcional y menciones. Añadir control de
-concurrencia, progreso por fichero y resultados inciertos.
+validadas, interpretación de `plain`/`markdown`, representación común del contenido y conversores ADF/JSM para el conjunto
+enriquecido. Incorporar revisión del resultado, matriz de compatibilidad por elemento y tratamiento explícito de alternativas.
+Incluir staging local y publicación de adjuntos JSM en dos fases con comentario opcional, enriquecido y con menciones. Añadir
+control de concurrencia, progreso por fichero y resultados inciertos.
 
 **Salida:** cada tipo de actualización y transferencia disponible, con rechazo seguro, aislamiento interno/público validado con
-cliente/agente y confirmación comprobada en Jira de pruebas. Las notas públicas/internas, los ficheros y las menciones son
+cliente/agente y confirmación comprobada en Jira de pruebas. Las notas públicas/internas, los ficheros, las menciones y el texto enriquecido son
 obligatorios en esta fase, no extensiones opcionales. No se dará por completada la fase mientras no se haya validado la
-representación y el reconocimiento real de menciones en Platform y en cada modalidad JSM indicada en la sección 5.6.
+representación del conjunto enriquecido y el reconocimiento real de menciones en Platform y en cada modalidad JSM indicada
+en la sección 5.6, con limitaciones documentadas y sin degradaciones silenciosas.
 
 ### Fase 3 — Robustez y distribución
 
