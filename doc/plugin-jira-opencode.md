@@ -4444,66 +4444,190 @@ No prometer rollback automático: una compensación es otro cambio, con su propi
 
 ## 12. Plan de desarrollo
 
+El desarrollo se organiza en cuatro fases con entregables y condiciones de cierre verificables. Los controles de seguridad,
+límites y recuperación forman parte de cada capacidad desde que se habilita: no se posponen hasta la fase de distribución.
+Las pruebas de la sección 10 y los procedimientos de la sección 11 acompañan la implementación.
+
+Este plan define el alcance y sus dependencias; el
+[README del paquete](../packages/opencode-jira/README.md#alcance-de-la-implementación) documenta las capacidades y límites
+del código disponible. La existencia de un módulo, un comando o una prueba simulada no acredita por sí sola el cierre de una fase.
+
+Para cada hito se conservarán evidencias sanitizadas de las pruebas ejecutadas, resultados y limitaciones, con referencia
+a los requisitos y a los [escenarios E00–E15](plugin-jira-opencode-escenarios.md#6-relación-con-la-especificación).
+No registrar tokens ni datos personales innecesarios. Una comprobación pendiente no se contará como superada.
+
 ### Fase 1 — Base y lectura
 
-Implementar paquete V2, parser de configuración, perfiles múltiples, secretos, HTTP seguro, identidad, búsqueda mejorada,
-consulta, detección de solicitudes JSM y comentarios/adjuntos paginados. Incorporar resolución contextual de personas para
-menciones mediante `jira_mention_candidates` y descarga binaria segura con permisos de escritura local. Entregar instalación local
-y global mediante el CLI de 6.9, base sin cuentas con predeterminados compartidos, instrucciones instaladas automáticamente
-y pruebas de lectura con dos cuentas, incluidas identidades de agente/cliente JSM. Cubrir instalación desde repositorio y
-tarball sin publicar, edición JSONC y repetición idempotente.
+**Dependencias de entrada**
 
-**Salida:** herramientas de consulta y descarga, base válida con `accounts: []` y guía de conexión de la primera cuenta;
-ninguna mutación remota registrada como ruta operativa.
+- Entorno Node.js/OpenCode V2 y contratos del SDK seleccionados y comprobados según 2 y 6.1.
+- Entorno Jira de pruebas autorizado para lecturas, con cuentas y fixtures que permitan comprobar Platform y JSM sin utilizar
+  información de producción. Preparación de tokens fuera del chat según 4.6.
 
-**Implementación local:** disponible en [`packages/opencode-jira`](../packages/opencode-jira/README.md),
-con siete herramientas de lectura/descarga, configuración de ejemplo, esquema de opciones,
-comandos de consulta y pruebas simuladas multicuenta/JSM. La búsqueda usa filtros
-estructurados, no JQL libre. La descarga segura requiere Linux y rechaza redirecciones
-a medios no validados. La validación real con Jira, identidades agente/cliente y
-modelos queda pendiente de un entorno de pruebas autorizado; véanse los límites e
-instrucciones de instalación del README del paquete.
+**Entregables**
 
-La resolución de candidatos, las menciones y los comentarios enriquecidos forman parte de los requisitos iniciales de esta guía.
-La descripción de la implementación local disponible no presupone que estas capacidades ya estén implementadas o validadas.
+- Paquete de servidor, parser y esquema de opciones, predeterminados compartidos, multicuenta y estado válido con `accounts: []`.
+  Implementar tanto `cloud-token` como `cloud-scoped-token`, selección explícita de identidad y referencias seguras a secretos.
+- Cliente HTTPS con validación de destinos y respuestas, límites reales de bytes/tiempo/concurrencia, cancelación y reintentos
+  de lectura acotados. Aplicar desde este punto las restricciones de proyectos, la minimización y la separación entre datos
+  externos e instrucciones.
+- Resultados normalizados y errores de 5.8, correlación segura, propagación de denegaciones de OpenCode y comprobación del
+  contexto de sesión/ubicación. Un error de cuenta no cambia de identidad ni bloquea las demás.
+- Búsqueda mejorada paginada, consulta de tickets y lectura de comentarios/adjuntos, detección de solicitudes JSM y
+  conservación de audiencias y menciones verificables. Resolver candidatos de personas para el contexto de ticket y audiencia
+  sin publicar, modificar accesos ni tratar candidatos como identidades ya autorizadas para cualquier comentario.
+- Descarga binaria con pertenencia comprobada, raíces y destino seguros, permisos remotos/locales, límites, tamaño/hash y
+  limpieza del temporal ante fallo. No abrir el archivo ni incorporarlo al modelo automáticamente.
+- Instalador local/global desde repositorio y tarball, con paquete completo y dependencias, `jira.md`, plantilla de cuenta
+  inactiva, base sin cuentas y permisos de 4.4. Incluir edición mínima de JSONC, manifiesto, repetición idempotente y recuperación
+  de interrupciones locales; no activar una instalación incompleta ni sobrescribir personalizaciones.
+- Recorridos de reinstalación y retirada local seguros para esos orígenes, conservando configuraciones y datos del usuario.
+  La instalación no realiza conexiones a Jira; `check --global` distingue preparación local de conectividad remota.
+
+**Herramientas habilitadas**
+
+`jira_accounts_list`, `jira_connection_test`, `jira_issues_search`, `jira_issue_get`, `jira_comments_list`,
+`jira_mention_candidates`, `jira_attachments_list` y `jira_attachment_download`.
+No registrar preparación/aplicación de cambios ni otra vía operativa de mutación remota.
+
+**Pruebas y evidencias de cierre**
+
+- Superar las pruebas aplicables de 10.1–10.4: ambas modalidades de autenticación, dos cuentas, separación por sitio/identidad,
+  búsqueda y cursores, candidatos ambiguos, restricciones, errores y permisos `jira.read`, `jira.download` y escritura local.
+- Comprobar con identidades agente/cliente la lectura JSM y los límites de visibilidad. Una lista vacía no demuestra por sí sola
+  que no haya contenido interno.
+- Verificar una descarga íntegra y su hash, rechazos sin transferencia de bytes y ausencia de archivos finales parciales o
+  sobrescrituras. Cubrir los destinos y redirecciones de 5.10 admitidos por el despliegue, rechazando los no validados.
+- Superar los casos de 10.6 correspondientes a los orígenes locales, incluidas interrupciones y conservación de instrucciones,
+  permisos y archivos del usuario. Comprobar carga global e instrucciones desde dos proyectos y con dos modelos con herramientas.
+- Conservar informes de mocks e integración real por separado, recibos de descargas, diagnósticos seguros y resultados de
+  instalación/carga. Relacionar la cobertura con E00–E04 y E13.
+
+**Salida:** lectura y descarga verificadas, resolución contextual de candidatos y base global utilizable sin cuentas o con
+perfiles reales configurados. Los criterios de 10.5 aplicables a estas capacidades deben estar satisfechos antes de cerrar la fase;
+no se afirma cobertura de escritura por haber completado consultas.
 
 ### Fase 2 — Escritura controlada
 
-Implementar metadata, ADF y texto JSM, preparación de atributos/comentarios/transiciones/cargas, propuestas inmutables, permisos,
-TTL, auditoría y recibos. Incluir notas internas y respuestas públicas al informador, menciones reales con identidad y audiencia
-validadas, interpretación de `plain`/`markdown`, representación común del contenido y conversores ADF/JSM para el conjunto
-enriquecido. Incorporar revisión del resultado, matriz de compatibilidad por elemento y tratamiento explícito de alternativas.
-Incluir staging local y publicación de adjuntos JSM en dos fases con comentario opcional, enriquecido y con menciones. Añadir
-control de concurrencia, progreso por fichero y resultados inciertos.
+**Dependencias de entrada**
 
-**Salida:** cada tipo de actualización y transferencia disponible, con rechazo seguro, aislamiento interno/público validado con
-cliente/agente y confirmación comprobada en Jira de pruebas. Las notas públicas/internas, los ficheros, las menciones y el texto enriquecido son
-obligatorios en esta fase, no extensiones opcionales. No se dará por completada la fase mientras no se haya validado la
-representación del conjunto enriquecido y el reconocimiento real de menciones en Platform y en cada modalidad JSM indicada
-en la sección 5.6, con limitaciones documentadas y sin degradaciones silenciosas.
+- Fase 1 cerrada y entorno autorizado para escrituras de prueba, con tickets, personas y archivos dedicados.
+- Validar al inicio, mediante pruebas técnicas acotadas, el formato y las menciones de 5.6 en comentarios Platform, notas
+  internas JSM, respuestas públicas y comentarios JSM con adjuntos. Obtener una matriz de representación comprobada por
+  elemento y destino antes de construir sobre una codificación supuesta.
+- Elegir almacenamiento y coordinación capaces de persistir plan, progreso y recibos con las garantías de 6.6. Definir el
+  flujo mínimo de reconciliación de 11.4 y una presentación íntegra de la revisión de 7.3.
+
+Las pruebas técnicas pueden escribir únicamente en ese entorno y con autorización. Detectar una limitación no elimina el
+requisito ni permite sustituir una mención por texto: obliga a resolver el contrato o documentar la alternativa admitida
+y su aceptación según 5.6. No habilitar escrituras operativas sin estos controles.
+
+**Entregables**
+
+- Metadata de campos y transiciones, validación de operaciones/valores y restricciones también dentro de una transición.
+- Preparación de atributos, comentarios, transiciones y cargas con `expectedUpdated`, TTL y contexto validado del servidor.
+  Separar el plan inmutable de `ChangeExecution`, sus revisiones y recibos; mantener el hash al incorporar IDs remotos o temporales.
+- Texto `plain`/`markdown`, representación común y conversores ADF/JSM, menciones reales con identidad/audiencia revalidadas
+  y tratamiento explícito de formato no admitido. Mantener la matriz comprobada y no convertir una advertencia en permiso
+  para perder contenido silenciosamente.
+- Revisión completa ligada a ID/hash, accesible en el cliente o vista segura. Verificar su presentación sin presuponer que
+  `metadata` se muestra íntegramente; no continuar con contenido oculto o truncado. La UI TUI propia no es una dependencia.
+- Autorización del recurso exacto bajo el flujo protegido; revalidación tras esperar la decisión, bloqueo/reclamación
+  concurrente y persistencia de `sending` antes de cada envío. Comprobar `allow`/`ask`/`deny` sin eludir `readOnly` o restricciones.
+- Staging local con bytes fijados y cargas Platform/JSM, incluidas las fases temporal/publicación y el comentario asociado,
+  sin duplicar mensajes. Conservar el progreso por archivo y fase.
+- Auditoría mínima, verificación directa posterior, recibos y deduplicación de aplicaciones confirmadas. Implementar desde
+  esta fase la reconciliación de resultados inciertos/parciales, recuperación tras caída y conservación de evidencias al vencer
+  el TTL; no repetir escrituras automáticamente ni prometer ejecución única extremo a extremo.
+- Integrar actualización/retirada local con el estado de las ejecuciones: no sustituir paquetes necesarios para trabajo activo
+  ni perder datos de recuperación. Aplicar la rotación y revalidación de identidad/alcance de 11.3 a propuestas y fases pendientes.
+
+**Herramientas habilitadas**
+
+Añadir a las de lectura `jira_issue_edit_metadata`, `jira_transitions_list`, `jira_issue_update_prepare`,
+`jira_comment_prepare`, `jira_attachment_upload_prepare`, `jira_transition_prepare` y `jira_change_apply`.
+No exponer escritura HTTP genérica, carga directa ni una herramienta ficticia de recuperación.
+
+**Pruebas y evidencias de cierre**
+
+- Superar las pruebas de escritura de 10.1–10.4: atributos incrementales, campos restringidos, transiciones con requisitos,
+  preparación sin mutación, revisión completa, rechazo humano y revalidación tras esperar la autorización.
+- Probar cambio de sesión/ubicación, identidad, política o estado del ticket; plan inmutable y registro separado; llamadas
+  concurrentes; devolución de recibos sin reaplicar y ausencia de reintentos de mutaciones.
+- Validar en Jira el conjunto enriquecido y el reconocimiento de personas en cada modalidad de 5.6, no sólo HTTP exitoso o
+  `@Nombre` visible. Comprobar interno/público con las identidades correspondientes y distinguir publicación de notificación.
+- Simular y reconciliar respuesta perdida, reinicio durante envío, fases temporales JSM y lotes parciales según 11.4.
+  Comprobar retención tras caducidad, sin modificar el plan ni reenviar pasos confirmados.
+- Conservar matriz de formato/menciones, revisiones ficticias o sanitizadas, decisiones de permiso, IDs/recibos de pruebas,
+  verificaciones remotas y resultados de recuperación. Relacionar la cobertura con E05–E12 y E14–E15.
+
+**Salida:** todos los tipos de escritura y transferencia obligatorios disponibles con controles y recuperación verificables.
+Las notas internas, respuestas públicas, archivos, menciones y contenido enriquecido forman parte de este cierre. Deben
+cumplirse los criterios funcionales y de seguridad de 10.5 relativos a estas operaciones; la consolidación de distribución
+no justifica posponer revisión íntegra, aislamiento de audiencias o reconciliación mínima.
 
 ### Fase 3 — Robustez y distribución
 
-Completar reintentos de lectura, límites, sanitización, recuperación, rotación, pruebas con varios modelos, empaquetado y
-documentación de instalación. Completar el recorrido de registro publicado del instalador, la recuperación de instalaciones
-interrumpidas y la actualización/desinstalación con conservación de personalizaciones, permisos y ejecuciones pendientes.
-Validar política de distribución y licencias.
+**Dependencias de entrada**
 
-**Salida:** paquete fijado instalable en un entorno limpio, instrucciones y configuración global comprobadas desde distintos
-proyectos, pruebas de 10.6 superadas y matriz de compatibilidad publicada.
+- Fases 1 y 2 cerradas, con límites, permisos, sanitización y recuperación operativos, no pendientes de incorporar.
+- Entornos limpios de instalación y matriz de runtimes, OpenCode, modelos y modalidades Jira que se pretenda declarar compatible.
+- Origen de distribución autorizado, revisión de dependencias, licencia y condiciones de Atlassian. No publicar por el mero
+  hecho de que el tarball se genere correctamente.
+
+**Entregables**
+
+- Consolidar y ampliar pruebas de carga, concurrencia, cancelación, reintentos de lectura, límites, privacidad, rotación y
+  recuperación. Verificar que la combinación de funcionalidades no debilita los controles establecidos.
+- Recorrido de registro publicado del instalador y campañas completas de instalación, actualización y desinstalación de 10.6:
+  interrupciones entre componentes, JSONC existente, conflictos de permisos, plantillas personalizadas y ejecuciones pendientes.
+- Paquete fijado y dependencias reproducibles, CLI y plantillas completos, compatibilidad documentada y diagnósticos de 11.1–11.4
+  utilizables por un operador. No incluir secretos, datos privados o registros de ejecución en la distribución.
+- Pruebas con los modelos y clientes seleccionados, incluidas las limitaciones de presentación de revisiones y Code Mode
+  cuando se habilite. La matriz de compatibilidad no presume que todos los agentes tengan las mismas herramientas o permisos.
+- Documentación de instalación, configuración sin cuentas y primera conexión, actualización, retirada y conservación de datos;
+  instrucciones predeterminadas sincronizadas con 9.4 y límites del producto identificados.
+
+**Pruebas y evidencias de cierre**
+
+- Ejecutar la campaña completa de la sección 10: pruebas unitarias, HTTP, Jira autorizado, OpenCode/modelos e instalador.
+  Aportar informes y evidencias de todos los criterios obligatorios de 10.5, no sólo de empaquetado o instalación.
+- Repetir recorridos E00–E15 relevantes en las combinaciones declaradas, con regresión de seguridad, resultados parciales,
+  cambios concurrentes y recuperación. Mantener los fallos simulados separados de las pruebas contra Jira real.
+- Comprobar desde distintos proyectos una instalación limpia sin dependencia del repositorio; preservar personalizaciones y
+  datos al actualizar/desinstalar y demostrar recuperación sin sobrescribir trabajo concurrente.
+- Conservar resultados de compatibilidad, revisión del contenido distribuido y documentación operativa sanitizada.
+
+**Salida:** paquete distribuible en el ámbito autorizado, con matriz de compatibilidad y evidencias de cumplimiento del
+conjunto obligatorio de 10.5, incluidas las pruebas de 10.6. No declarar terminado el producto con un requisito obligatorio
+pendiente ni presentar un procedimiento documentado como una prueba ya superada.
 
 ### Fase 4 — Extensiones opcionales
 
-- Comandos y UI TUI determinista para revisar propuestas sin depender de la presentación del modelo.
-- Integración con almacén de credenciales nativo de OpenCode, tras validar el contrato V2 de conexiones y su selección
-  multicuenta; no asumir que una única conexión activa por integración cubre todos los perfiles.
-- OAuth para escenarios de distribución a terceros.
-- Jira Data Center y otras plataformas mediante nuevos adaptadores.
-- Servidor MCP opcional si se necesita reutilizar el núcleo desde otros asistentes. No es necesario para exponer herramientas a
-  modelos dentro de OpenCode.
+**Dependencias de entrada:** alcance obligatorio cerrado y necesidad concreta de la extensión. Revisar el contrato, amenazas,
+compatibilidad y condiciones de distribución del nuevo ámbito antes de habilitarlo.
 
-**Orden recomendado:** no comenzar por una UI compleja. Primero garantizar perfiles, lectura correcta, límites, permisos y
-semántica segura de escritura.
+**Entregables posibles**
+
+- Comandos deterministas y UI TUI propia para facilitar la revisión. Es opcional esa implementación de interfaz, no el acceso
+  a una revisión completa y verificable, obligatorio desde la fase 2.
+- Integración con almacén de credenciales nativo de OpenCode, validando el contrato V2 y la selección multicuenta; no asumir
+  que una única conexión activa por integración cubre todos los perfiles.
+- OAuth para usos que lo requieran. Su desarrollo es opcional para el ámbito personal/interno definido, pero no permite omitir
+  una exigencia de autenticación o distribución de Atlassian si se adopta otro ámbito.
+- Jira Data Center u otras plataformas mediante adaptadores y matrices de capacidades explícitas.
+- Servidor MCP para reutilizar el núcleo desde otros asistentes. No es necesario para ofrecer herramientas a los modelos de OpenCode.
+
+**Pruebas y evidencias de cierre:** para cada extensión, definir criterios específicos y repetir las pruebas obligatorias
+afectadas de la sección 10, aportando evidencia de compatibilidad, permisos, identidad y recuperación. No rebajar contratos
+de seguridad ni fingir capacidades equivalentes entre plataformas.
+
+**Salida:** cada extensión seleccionada se entrega con su alcance y validación propios; no modifica la obligatoriedad de los
+criterios del producto base ni bloquea su cierre si no forma parte del alcance elegido.
+
+**Orden de ejecución:** garantizar perfiles, lecturas, límites y permisos; validar las representaciones de escritura;
+habilitar mutaciones sólo con revisión y recuperación; consolidar distribución y compatibilidad; abordar después las
+extensiones justificadas. No comenzar por una interfaz compleja ni aplazar controles esenciales para poder publicar antes.
 
 ## 13. Referencias
 
