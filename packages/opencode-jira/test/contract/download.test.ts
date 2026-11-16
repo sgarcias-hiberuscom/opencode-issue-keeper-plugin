@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { Service } from "../../src/core/service.js";
 import { saveDownload, planDownload } from "../../src/files.js";
-import { attachment, config, issue, json, mockFetch, request, signal } from "../helpers.js";
+import { createService, attachment, config, issue, json, mockFetch, request, signal } from "../helpers.js";
 
 let location: string;
 beforeEach(async () => { vi.stubEnv("IK_TEST_WORK", "work-secret"); location = await mkdtemp("/tmp/opencode/ik-download-"); });
@@ -13,6 +12,7 @@ afterEach(async () => { vi.unstubAllEnvs(); await rm(location, { recursive: true
 function platformFetch(binary: () => Response = () => new Response("hello")) {
   return mockFetch((url) => {
     if (url.pathname.includes("/attachment/content/")) { expect(url.searchParams.get("redirect")).toBe("false"); return binary(); }
+    if (url.pathname === "/rest/api/3/attachment/101") return json(attachment);
     if (url.searchParams.get("fields") === "attachment,project") return json({ id: "10001", fields: { project: issue().fields.project, attachment: [attachment] } });
     return json(issue());
   });
@@ -22,7 +22,7 @@ const access = () => ({ read: vi.fn(async () => {}), local: vi.fn(async () => {}
 
 describe("protected binary download", () => {
   it("checks membership and local authorization, streams bytes and returns a server receipt", async () => {
-    const fetcher = platformFetch(); const service = await Service.create(config(), location, fetcher); const permissions = access();
+    const fetcher = platformFetch(); const service = await createService(config(), location, fetcher); const permissions = access();
     try {
       const receipt = await service.download(input, signal(), permissions);
       expect(permissions.local).toHaveBeenCalledTimes(1);
@@ -33,7 +33,7 @@ describe("protected binary download", () => {
     } finally { service.close(); }
   });
   it("does not overwrite an existing destination", async () => {
-    const service = await Service.create(config(), location, platformFetch());
+    const service = await createService(config(), location, platformFetch());
     try {
       const first = await service.download(input, signal(), access());
       await expect(service.download(input, signal(), access())).rejects.toMatchObject({ code: "FILE_ACCESS_DENIED" });
@@ -42,7 +42,7 @@ describe("protected binary download", () => {
     } finally { service.close(); }
   });
   it("propagates a native denial before transferring bytes or creating a directory", async () => {
-    const fetcher = platformFetch(); const service = await Service.create(config(), location, fetcher); const denial = new Error("OpenCode permission rejected");
+    const fetcher = platformFetch(); const service = await createService(config(), location, fetcher); const denial = new Error("OpenCode permission rejected");
     try {
       const permissions = access(); permissions.local.mockRejectedValue(denial);
       await expect(service.download(input, signal(), permissions)).rejects.toBe(denial);
@@ -51,7 +51,7 @@ describe("protected binary download", () => {
     } finally { service.close(); }
   });
   it("does not retrieve a global ID absent from the ticket", async () => {
-    const fetcher = platformFetch(); const service = await Service.create(config(), location, fetcher);
+    const fetcher = platformFetch(); const service = await createService(config(), location, fetcher);
     try {
       await expect(service.download({ ...input, attachmentId: "999" }, signal(), access())).rejects.toMatchObject({ code: "NOT_FOUND_OR_NO_ACCESS" });
       expect(fetcher.mock.calls.some(([url]) => String(url).includes("attachment/content"))).toBe(false);
@@ -61,10 +61,10 @@ describe("protected binary download", () => {
     [() => new Response("hel"), "TRANSFER_INCOMPLETE"],
     [() => new Response("hello extra"), "TRANSFER_INCOMPLETE"],
     [() => new Response("hello", { headers: { "content-length": "999999999" } }), "ATTACHMENT_TOO_LARGE"],
-    [() => new Response(null, { status: 303, headers: { location: "https://media.example.com/signed" } }), "FORBIDDEN"],
+    [() => new Response(null, { status: 303, headers: { location: "https://media.example.com/signed" } }), "REDIRECT_NOT_ALLOWED"],
     [() => new Response(new ReadableStream({ start(controller) { controller.error(new Error("network broke")); } })), "TRANSFER_INCOMPLETE"],
   ])("fails incomplete/oversized/redirected transfers and leaves no final file (%#)", async (binary, code) => {
-    const service = await Service.create(config(), location, platformFetch(binary));
+    const service = await createService(config(), location, platformFetch(binary));
     try {
       await expect(service.download(input, signal(), access())).rejects.toMatchObject({ code });
       const files = await readdir(join(location, ".issuekeeper/downloads")).catch(() => []);
@@ -72,7 +72,7 @@ describe("protected binary download", () => {
     } finally { service.close(); }
   });
   it("refuses symlink directories and destination symlinks", async () => {
-    const service = await Service.create(config(), location, platformFetch());
+    const service = await createService(config(), location, platformFetch());
     try {
       await mkdir(join(location, "elsewhere"), { mode: 0o700 });
       await symlink(join(location, "elsewhere"), join(location, ".issuekeeper"));
@@ -96,7 +96,7 @@ describe("protected binary download", () => {
   });
   it("refuses a location that another user could rewrite", async () => {
     await chmod(location, 0o777);
-    const service = await Service.create(config(), location, platformFetch());
+    const service = await createService(config(), location, platformFetch());
     try {
       await expect(service.download(input, signal(), access())).rejects.toMatchObject({ code: "FILE_ACCESS_DENIED" });
       expect(await readdir(location)).toEqual([]);
@@ -109,7 +109,7 @@ describe("protected binary download", () => {
       if (url.pathname.includes("/api/3/issue/")) return json(issue());
       return json(request());
     });
-    const service = await Service.create(c, location, fetcher);
+    const service = await createService(c, location, fetcher);
     try {
       expect((await service.download(input, signal(), access())).data.size).toBe(5);
       expect(fetcher.mock.calls.some(([url]) => String(url).includes("attachment/content"))).toBe(false);
@@ -118,7 +118,7 @@ describe("protected binary download", () => {
   it("aborts stalled binary streaming and removes only its own temporary", async () => {
     const c = config(); c.attachments.transferTimeoutMs = 30;
     const cancelled = vi.fn();
-    const service = await Service.create(c, location, platformFetch(() => new Response(new ReadableStream({
+    const service = await createService(c, location, platformFetch(() => new Response(new ReadableStream({
       start(controller) { controller.enqueue(new TextEncoder().encode("he")); }, cancel: cancelled,
     }))));
     try {

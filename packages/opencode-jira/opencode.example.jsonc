@@ -17,8 +17,8 @@
             },
             "readOnly": true,
             "serviceManagement": { "enabled": true },
-            "allowedProjects": ["IK"],
-            "allowedUpdateFields": []
+            "restrictedProjects": ["CONFIDENCIAL"],
+            "restrictedUpdateFields": []
           },
           {
             "id": "cliente",
@@ -31,8 +31,8 @@
             },
             "readOnly": true,
             "serviceManagement": { "enabled": true },
-            "allowedProjects": ["IK"],
-            "allowedUpdateFields": []
+            "restrictedProjects": [],
+            "restrictedUpdateFields": []
           }
         ],
         "defaultAccount": "trabajo",
@@ -40,11 +40,13 @@
       }
     }
   ],
+  "instructions": ["./packages/opencode-jira/templates/jira.md"],
   "permissions": [
     { "action": "jira.accounts", "resource": "*", "effect": "allow" },
     { "action": "jira.read", "resource": "*", "effect": "ask" },
-    { "action": "jira.write", "resource": "*", "effect": "deny" },
+    { "action": "jira.write", "resource": "*", "effect": "ask" },
     { "action": "jira.download", "resource": "*", "effect": "ask" },
-    { "action": "edit", "resource": "*/.issuekeeper/*", "effect": "ask" }
+    { "action": "read", "resource": "exports/*", "effect": "ask" },
+    { "action": "edit", "resource": ".issuekeeper/downloads/*", "effect": "ask" }
   ]
 }

@@ -3,7 +3,6 @@
   "type": "object",
   "properties": {
     "accounts": {
-      "minItems": 1,
       "maxItems": 50,
       "type": "array",
       "items": {
@@ -106,8 +105,8 @@
             },
             "additionalProperties": false
           },
-          "allowedProjects": {
-            "minItems": 1,
+          "restrictedProjects": {
+            "default": [],
             "maxItems": 100,
             "type": "array",
             "items": {
@@ -115,41 +114,20 @@
               "pattern": "^[A-Z][A-Z0-9_]{0,39}$"
             }
           },
-          "allowedReadFields": {
-            "default": [
-              "summary",
-              "description",
-              "status",
-              "assignee",
-              "reporter",
-              "project",
-              "updated",
-              "labels",
-              "priority",
-              "issuetype"
-            ],
-            "maxItems": 50,
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,99}$"
-            }
-          },
-          "allowedUpdateFields": {
+          "restrictedUpdateFields": {
             "default": [],
             "maxItems": 50,
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,99}$"
+              "pattern": "^(?:[a-zA-Z][a-zA-Z0-9_]{0,99})$"
             }
           }
         },
         "required": [
           "id",
           "siteUrl",
-          "auth",
-          "allowedProjects"
+          "auth"
         ],
         "additionalProperties": false
       }
@@ -285,7 +263,8 @@
         "overwrite": {
           "default": false,
           "type": "boolean",
-          "const": false
+          "const": false,
+          "description": "Sólo false; nunca se sobrescriben descargas."
         }
       },
       "additionalProperties": false

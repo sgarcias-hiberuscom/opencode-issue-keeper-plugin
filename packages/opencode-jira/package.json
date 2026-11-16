@@ -3,16 +3,39 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./dist/index.js" },
-  "files": ["dist", "README.md", "options.schema.json", "opencode.example.jsonc"],
-  "engines": { "node": ">=22" },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md",
+    "options.schema.json",
+    "opencode.example.jsonc"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": { "issuekeeper-jira": "./dist/cli.js" },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/schema.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --maxWorkers=2",
+    "test:mock": "vitest run test/unit test/contract test/installer --maxWorkers=2 --reporter=default --reporter=json --outputFile=reports/mock/results.json",
+    "test:live": "vitest run test/integration --maxWorkers=1 --reporter=default --reporter=json --outputFile=reports/live/results.json",
+    "test:installer": "vitest run test/installer --maxWorkers=1",
+    "install:global": "npm run build && node dist/cli.js install --global --source local",
     "test:pack": "npm run build && node scripts/pack-smoke.mjs",
     "prepack": "npm run build"
   },
-  "dependencies": { "@opencode/plugin": "2.2.5", "zod": "4.6.7" },
-  "devDependencies": { "@types/node": "22.20.0", "typescript": "5.9.3", "vitest": "4.1.12" }
+  "dependencies": {
+    "@opencode/plugin": "2.2.5",
+    "jsonc-parser": "3.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
 }
