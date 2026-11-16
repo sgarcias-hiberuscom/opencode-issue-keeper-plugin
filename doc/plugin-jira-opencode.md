@@ -3999,6 +3999,26 @@ el diálogo con el usuario.
 
 ## 10. Pruebas y criterios de aceptación
 
+Las pruebas verifican los contratos y controles de las secciones 4–9, no sólo que Jira responda sin error. Conservar como
+evidencia las llamadas realizadas, las decisiones de permisos, los resultados normalizados y los efectos comprobados,
+sin registrar secretos ni datos personales innecesarios. Un caso descrito aquí no se considera superado hasta ejecutarlo
+en el nivel correspondiente: simulación, integración con OpenCode o Jira de pruebas.
+
+El [documento de escenarios](plugin-jira-opencode-escenarios.md#6-relación-con-la-especificación) aporta recorridos de referencia:
+
+| Escenarios | Cobertura relacionada |
+| --- | --- |
+| E00 | Instalación global, instrucciones y base sin cuentas: 10.1, 10.4 y 10.6. |
+| E01–E04 | Cuentas, lecturas, paginación, advertencias y acceso: 10.1–10.4. |
+| E05–E06 | Edición incremental, recibos, conflictos y nueva autorización: 10.1–10.4. |
+| E07–E08 | Identidades, formato y aceptación de alternativas: 10.1–10.4. |
+| E09–E10 | Audiencia JSM y publicación frente a notificación: 10.2–10.4. |
+| E11–E12 | Transiciones, rechazos, caducidad y contexto: 10.1–10.4. |
+| E13–E15 | Descargas, cargas, fases y resultados inciertos: 10.1–10.4 y procedimiento de 11.4. |
+
+Los escenarios no sustituyen las pruebas negativas, de concurrencia o de seguridad. Cada suite relacionará los casos con los
+requisitos y escenarios aplicables, sin duplicar sus diálogos como si fueran resultados de ejecución.
+
 ### 10.1. Pruebas unitarias
 
 - Configuración: alias duplicados, predeterminado inexistente, modos de autenticación y fuentes de token excluyentes.
@@ -4035,16 +4055,27 @@ el diálogo con el usuario.
 - Payloads: etiquetas incrementales, `null`, arrays, campo duplicado entre `fields`/`update`, comentarios/transiciones embebidos
   prohibidos.
 - Propuestas: TTL, hash estable, vínculo de sesión/ubicación, políticas cambiadas y estados de recuperación.
+- Plan y ejecución: conservar el plan y su hash sin cambios al actualizar `ChangeExecution`, sus revisiones, fases, referencias
+  temporales y recibos. Verificar persistencia de `sending` antes del envío y tratamiento de una caída sin respuesta como
+  incertidumbre, no como un paso pendiente de enviar.
+- Deduplicación: devolver el recibo de una ejecución confirmada, desde un contexto válido, sin volver a invocar una mutación.
+  Un registro incierto o parcial no se trata como preparado ni como éxito completo.
+- Revisión: construir la vista desde el plan guardado y vincularla a ID y hash. Rechazar contenido incompleto, truncado o
+  distinto del plan; un resumen aportado por el modelo no sustituye esa vista.
 - Propuestas enriquecidas: cambiar `plain` por `markdown`, las opciones de conversión, la estructura o el payload final
   invalida la aprobación anterior; las alternativas se aceptan y preparan de nuevo antes de aplicar.
 - Reintentos: máximo de intentos, jitter, `Retry-After`, cancelación y escrituras no repetidas.
-- Salida: JSON válido, campos mínimos, truncamiento explícito y límites de bytes.
+- Salida: JSON válido, envoltura y códigos de 5.8, campos mínimos, advertencias, truncamiento explícito y límites de bytes.
+  Los argumentos inválidos producen diagnósticos seguros sin copiar valores sensibles. Las denegaciones y cancelaciones de
+  OpenCode se propagan sin envolverlas como errores de Jira.
 - Audiencia: `ticket`/`internal`/`public` obligatoria en preparación, mapeo correcto a `public`, separación ADF/string y rechazo
   de degradaciones entre APIs.
 - Ficheros: pertenencia cuenta/ticket, traversal, nombres maliciosos, symlinks, carreras de apertura, tipos especiales, cuotas y
   límites individuales/acumulados.
 - Staging: hash de bytes, contenido inmutable, modificación del original tras preparar, expiración y limpieza sin borrar archivos
   ajenos.
+- Retención: al caducar una propuesta, conservar plan, registro, recibos y copias aún necesarios para ejecuciones en curso,
+  parciales o inciertas. Su conservación no renueva la autorización ni habilita reenvíos.
 
 ### 10.2. Pruebas de contrato HTTP
 
@@ -4059,7 +4090,8 @@ Con respuestas simuladas y validadas contra el contrato Jira:
 - Escrituras `204` sin cuerpo y comentario `201`.
 - 400, 401, 403, 404, 409, 413, 422, 429 y 5xx.
 - HTML inesperado, JSON inválido y stream sobredimensionado sin `Content-Length`.
-- Redirección a otro host: no seguirla y no filtrar Authorization.
+- Transporte JSON: rechazar redirecciones según 6.3, incluido otro host, sin filtrar `Authorization`. Esta regla no equivale
+  a prohibir las redirecciones controladas del transporte binario de 5.10.
 - Timeout antes/después del envío y respuesta perdida tras escritura aceptada.
 - JSM: JSON de comentario con `public: false`/`true`, filtros `public`/`internal`, paginación `start`/`limit` y respuesta vacía
   por restricciones.
@@ -4073,7 +4105,8 @@ Con respuestas simuladas y validadas contra el contrato Jira:
 - JSM en dos fases: temporales creados, IDs caducados, error antes de publicación y pérdida de la respuesta final; no duplicar
   comentario/adjuntos.
 - Binario: streaming acotado, interrupción, tamaño anunciado incorrecto, disco lleno, destinos existentes y 303 a medios
-  permitidos/prohibidos sin fuga de Authorization.
+  permitidos/prohibidos. Comprobar validación de HTTPS, host/ruta y número de saltos, sin reenviar credenciales o cookies de
+  Jira ni exponer URLs firmadas al modelo.
 
 Simular 429 localmente: no provocar rate limiting deliberadamente contra tenants Atlassian.
 
@@ -4086,7 +4119,8 @@ Simular 429 localmente: no provocar rate limiting deliberadamente contra tenants
 - Cuenta con restricciones: proyectos bloqueados en consultas, cambios y adjuntos; campos restringidos no editables pero
   consultables. Una transición sin cambios en esos campos y los comentarios o adjuntos no quedan bloqueados sólo por
   `restrictedUpdateFields`.
-- Token con scopes y modo directo si se decide soportar ambos en la entrega.
+- Ambas modalidades de 4.2: `cloud-token` contra el sitio y `cloud-scoped-token` mediante el gateway con `cloudId`.
+  Comprobar construcción de rutas, identidad, permisos y scopes para Platform y JSM, sin detectar el modo por el aspecto del token.
 - Proyectos/códigos coincidentes entre sitios para detectar cruces de cuenta.
 - Campos personalizados con contextos distintos y un workflow con campos obligatorios.
 - Ticket oculto por seguridad de incidencia y comentario con visibilidad restringida.
@@ -4116,13 +4150,23 @@ Nunca grabar tokens en fixtures o snapshots.
   sin conectividad remota hasta configurar un perfil real. No confundir la carga de instrucciones con obediencia garantizada.
 - Registro de todos los nombres efectivos del catálogo.
 - Recarga de configuración y descarga del plugin sin duplicar registros.
-- Permiso de lectura permitido/denegado y escritura con `ask`/`deny`.
+- Permiso de lectura permitido/denegado y escritura con `allow`/`ask`/`deny`. Con `allow` puede no aparecer un diálogo, pero
+  siguen siendo obligatorios el plan revisable y las validaciones; `readOnly` y las restricciones locales no se eluden.
+- Revisión completa en el cliente o vista segura vinculada al mismo ID/hash. Probar un cliente que no muestre todos los
+  campos de `metadata`: no continuar si la revisión oculta contenido o está truncada, aunque el resumen sea correcto.
 - Rechazo humano sin ninguna llamada de mutación a Jira.
 - Dos llamadas concurrentes a `change_apply` para la misma propuesta: una sola ejecución del plan y ninguna petición de mutación
   duplicada por fase/fichero mientras el coordinador siga operativo.
-- Dos sesiones: ninguna puede aplicar propuestas de la otra.
-- Cambio de cuenta/configuración/identidad durante una aprobación pendiente.
+- Dos sesiones: ninguna puede aplicar propuestas de la otra. Cambiar la ubicación de una sesión después de preparar no
+  permite aplicar un plan vinculado a otra ubicación; los argumentos del modelo no sustituyen el contexto del servidor.
+- Cambio de cuenta, configuración, identidad, permisos, ubicación o estado del ticket durante una aprobación pendiente.
+  Revalidar después de esperar la decisión y antes de enviar; detener los cambios incompatibles sin modificar el plan ni
+  reutilizar su aprobación para otro. Comprobar también la vigencia según 6.6.
 - Reinicio tras estado `applying`: resultado incierto, nunca reenvío ciego.
+- Progreso por archivo/fase: recuperar recibos confirmados y pasos inciertos sin alterar el plan ni repetir el lote.
+  Si se pierde una respuesta después de que Jira acepte la operación, reconciliar antes de continuar.
+- Limpieza tras vencer el TTL durante una ejecución o reconciliación: no perder evidencias ni copias necesarias. Comprobar
+  también la devolución de un recibo confirmado sin un nuevo envío en las condiciones de 6.6.
 - Cancelación de sesión y propagación a consultas y colas.
 - Al menos dos modelos de proveedores distintos con tool calling; si se usa Code Mode, repetir esa matriz.
 - Ticket malicioso que solicita revelar secretos o editar otro sitio: los controles bloquean la acción.
@@ -4148,6 +4192,7 @@ Nunca grabar tokens en fixtures o snapshots.
 - [ ] El alias identifica la cuenta en todas las salidas y errores operativos.
 - [ ] Las búsquedas usan `/search/jql` y paginación correcta.
 - [ ] Los tickets se consultan por código y conservan ID/código canónico.
+- [ ] Las dos modalidades de autenticación de 4.2 están comprobadas para las operaciones Platform y JSM correspondientes.
 - [ ] Se pueden preparar y aplicar atributos, comentarios y transiciones autorizados.
 - [ ] Las herramientas admiten `format: "plain"` y `format: "markdown"`, con `plain` por defecto, para comentarios y
   comentarios JSM con adjuntos; el contenido enriquecido se prepara, revisa y fija antes de autorizar la publicación.
@@ -4165,11 +4210,18 @@ Nunca grabar tokens en fixtures o snapshots.
 - [ ] Las descargas no se ejecutan, abren ni incorporan automáticamente al contexto del modelo.
 - [ ] Se distingue comentario publicado de notificación enviada/entregada.
 - [ ] Una propuesta no cambia Jira y una escritura denegada no se envía.
+- [ ] La revisión completa corresponde al ID y hash guardados y es accesible antes de autorizar; no se continúa con una
+  presentación truncada ni se presupone que `metadata` se muestra íntegramente.
+- [ ] Después de esperar una aprobación se revalidan el contexto del servidor, la política y la frescura; cambios incompatibles
+  no alteran el plan ni reutilizan la decisión humana para otro contenido.
 - [ ] El modo sólo lectura y las restricciones opcionales de proyectos y campos se verifican en el servidor; omitir las listas o
   usar `[]` no añade bloqueos ni amplía los permisos de Jira o del token.
 - [ ] Los tokens no aparecen en prompts, argumentos, resultados o logs del plugin.
 - [ ] Dos sesiones no comparten cuenta activa mutable ni propuestas aplicables.
+- [ ] Los cambios de ubicación relevantes impiden aplicar una propuesta vinculada a otro contexto.
+- [ ] El plan permanece inmutable, el progreso se guarda por separado y un resultado confirmado devuelve su recibo sin reaplicar.
 - [ ] Escrituras inciertas no se repiten automáticamente ni se reportan como éxito.
+- [ ] Caducar una autorización no elimina los datos necesarios para una ejecución pendiente o su reconciliación.
 - [ ] Los modelos seleccionados pueden usar las herramientas según capacidades y política.
 - [ ] Instalación, actualización, desinstalación y rotación están verificadas.
 
@@ -4203,19 +4255,56 @@ ni utilizan credenciales o conexiones a Jira:
 
 ### 11.1. Diagnóstico seguro
 
-Para comprobar el servicio OpenCode:
+Distinguir tres niveles: **instalación local**, **carga en la sesión de OpenCode** y **conexión/autorización en Jira**.
+Superar uno no demuestra que los siguientes funcionen.
+
+1. **Comprobar la instalación.** En Linux, con las rutas habituales de 8.1:
+
+```bash
+node "$HOME/.local/share/issuekeeper/opencode-jira/node_modules/@issuekeeper/opencode-jira/dist/cli.js" check --global
+```
+
+Este es el CLI del paquete, no un subcomando nativo de OpenCode. Su directorio no tiene por qué estar en `PATH`; adaptar la
+ruta al destino real si se utilizan directorios de datos distintos. `check` no modifica archivos ni consulta Jira: comprueba
+paquete, dependencias, plantillas, referencias y configuración. Si falta el CLI, seguir la recuperación local de 11.4 con un
+origen confiable; no borrar la configuración para intentar reinstalar desde cero.
+
+2. **Comprobar el servidor y la carga.** Consultar el servicio al que se conecta el cliente:
 
 ```bash
 opencode service status
 opencode api get /api/info
+```
+
+La CLI utiliza su descubrimiento y autenticación de servicio; `opencode api` puede iniciar el servicio si no encuentra uno
+compatible. Para una sesión conectada a otro servidor, utilizar su contexto autorizado, no comprobar por error una instancia
+local distinta. Como inventario auxiliar de paquetes administrados por OpenCode:
+
+```bash
 opencode plugin list
 ```
 
-Revisar `~/.local/share/opencode/log/opencode.log`, filtrando los eventos del plugin o del servidor. Redactar secretos, cuerpos
-Jira, emails y datos del proyecto antes de compartir un log.
+Ese inventario no prueba que una ruta local esté cargada en la sesión ni que `jira.md` se haya incorporado. Revisar la
+configuración efectiva, la existencia y lectura de las instrucciones y las restricciones del agente. Pedir una invocación
+real de `jira_accounts_list` desde el proyecto afectado y otro proyecto de control; una explicación sin herramienta no es
+una prueba de carga. Una lista vacía es válida cuando `accounts: []`.
+
+3. **Comprobar la conexión con Jira.** Si hay una cuenta real configurada, ejecutar `jira_connection_test` con su alias y
+   comprobar sitio e identidad, sin mostrar credenciales. Después realizar una consulta pequeña autorizada. Una identidad
+   autenticada no demuestra permiso para editar todos los tickets ni para publicar notas internas de JSM.
+
+En ningún nivel utilizar una escritura de producción como prueba de conexión. Las pruebas de escritura siguen 8.3 y requieren
+su entorno de pruebas y autorización.
+
+Revisar `~/.local/share/opencode/log/opencode.log`, filtrando `role=server` y los eventos pertinentes del plugin. Correlacionar
+mediante `requestId`, propuesta y hash cuando existan, sin incluir cuerpos completos en el diagnóstico. En problemas del
+instalador, consultar su manifiesto y progreso local, no confundirlos con el registro de ejecución de una propuesta Jira.
+Ocultar secretos, cuerpos Jira, emails y datos del proyecto antes de compartir un log.
 
 Usar nivel debug sólo temporalmente y con redacción activa. Un log detallado no debe incluir cabeceras de autenticación ni
-opciones completas del plugin. No reiniciar o borrar bases de datos como primera medida de diagnóstico.
+opciones completas del plugin. No borrar ni editar directamente bases de datos, registros de propuestas o archivos del
+servicio como primera medida de diagnóstico. Guardar configuración utiliza su recarga normal; reservar un reinicio del servicio
+para un problema de salud identificado, conservando antes la información de ejecuciones pendientes.
 
 ### 11.2. Tabla de problemas frecuentes
 
@@ -4223,8 +4312,9 @@ opciones completas del plugin. No reiniciar o borrar bases de datos como primera
 |---------------------------------------------------------|----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
 | No aparecen herramientas                                | Plugin no cargado, `dist` ausente o SDK incompatible                                   | Revisar ruta de directorio, exports, build y log.                                                                          |
 | Lista de cuentas vacía tras instalar                     | Base válida sin perfiles                                                              | Añadir una cuenta real desde la plantilla; no tratarlo como fallo de token ni activar una cuenta dummy.                  |
-| No se cargan las instrucciones Jira                      | Archivo ausente, no legible o referencia equivocada                                    | Ejecutar `issuekeeper-jira check --global` mediante el CLI instalado y revisar la ruta absoluta sin sobrescribir personalizaciones. |
+| No se cargan las instrucciones Jira                      | Archivo ausente, no legible o referencia equivocada                                    | Ejecutar el CLI por su ruta completa como en 11.1 y revisar `instructions` sin sobrescribir personalizaciones. |
 | Instalador detecta conflicto de configuración            | Entradas duplicadas, reglas incompatibles o edición concurrente                        | Revisar el plan local y decidir su combinación; no forzar un reemplazo global ni relajar denegaciones.                   |
+| Instalación o retirada incompleta                        | Fallo de npm, escritura local o interrupción entre pasos                               | Consultar manifiesto y seguir la recuperación local de 11.4; no borrar archivos ajenos ni anunciar éxito completo. |
 | El plugin aparece pero el modelo no lo usa              | Modelo sin tool calling, descripción insuficiente o permisos de agente                 | Probar otro modelo compatible, listar catálogo y revisar reglas.                                                           |
 | Un comando cambia de modelo                             | Frontmatter/configuración fija `model` o un agente con modelo propio                   | Omitir overrides si se quiere conservar la selección de sesión.                                                            |
 | Token por variable no encontrado                        | El servicio no heredó la variable                                                      | Configurar el entorno del servidor o usar archivo protegido.                                                               |
@@ -4236,10 +4326,17 @@ opciones completas del plugin. No reiniciar o borrar bases de datos como primera
 | No se puede cambiar estado                              | Se intenta editar `status` o transición no disponible                                  | Consultar transiciones y requerimientos del workflow.                                                                      |
 | Campo inválido o restringido                            | ID/contexto/tipo equivocado o campo incluido en `restrictedUpdateFields`               | Consultar metadata del ticket y revisar las restricciones locales.                                                         |
 | `@usuario` aparece como texto o menciona a otra persona | Identidad no resuelta, representación no compatible o conversión incorrecta            | Revisar candidatos, `mentions` y el adaptador de la API; no dar por válida la funcionalidad ni republicar automáticamente. |
+| `MENTION_AMBIGUOUS` / `MENTION_UNRESOLVED`                | Persona no identificada de forma unívoca o búsqueda insuficiente                       | Pedir aclaración o revisar acceso a candidatos; no elegir por similitud ni publicar la mención como texto. |
+| `MENTION_NOT_ALLOWED` / `MENTION_NOT_SUPPORTED`           | Identidad no validada para la audiencia o representación no compatible                 | Detener la preparación/publicación; revisar identidad y permisos sin añadir participantes ni ampliar audiencia. |
+| `FORMAT_INVALID` / `FORMAT_NOT_SUPPORTED`                | Entrada inválida o elemento sin representación admitida                                | Corregir el contenido o pedir aceptación de una alternativa antes de preparar otro plan; no degradar silenciosamente. |
+| Revisión incompleta o truncada                          | Límites de salida o cliente que no muestra el contenido completo                       | Proporcionar una vista íntegra segura vinculada al mismo ID/hash antes de autorizar; `metadata` o un resumen no bastan. |
 | No se pide confirmación                                 | Regla efectiva `allow` o aprobación guardada                                           | Revisar reglas globales/agente/sesión; configurar `ask` y recursos exactos.                                                |
 | Comentario duplicado                                    | Reintento ciego tras timeout                                                           | Detener reenvíos, reconciliar y corregir el control de propuestas.                                                         |
 | La búsqueda no refleja la escritura                     | Índice de búsqueda con consistencia diferida                                           | Verificar por `GET issue`; reconciliar según API.                                                                          |
-| Una propuesta deja de aplicar                           | TTL, cambios concurrentes o política/identidad nueva                                   | Consultar de nuevo y preparar otra propuesta.                                                                              |
+| `CONFLICT` / `PROPOSAL_EXPIRED` antes del envío           | Datos del ticket cambiados o vencimiento de la autorización                            | Consultar y preparar otro plan revisable; no alterar el guardado ni reutilizar la aprobación. Si hubo envíos, reconciliar primero. |
+| `PROPOSAL_INVALID` por sesión o ubicación                | El plan no pertenece al contexto validado actual                                       | Preparar en la sesión/ubicación correcta sin sustituir IDs del servidor desde argumentos del modelo; comprobar cualquier ejecución previa. |
+| `WRITE_OUTCOME_UNKNOWN`                                 | Se envió una escritura sin confirmación concluyente                                    | Conservar registros y seguir 11.4 antes de cualquier reenvío; la falta de respuesta no demuestra que Jira no escribiera. |
+| `PARTIAL_UPLOAD`                                        | Algunos archivos o fases están confirmados y otros han fallado                         | Informar el progreso por archivo/fase y revisar sólo una continuación segura; no repetir el lote completo. |
 | HTTP 429                                                | Ráfaga, límites de sitio o de escrituras                                               | Respetar espera, reducir concurrencia y no rotar cuentas para eludir límites.                                              |
 | No se puede publicar nota interna                       | Identidad sólo cliente, permisos JSM insuficientes o ticket no es solicitud JSM        | Revisar capacidad/identidad; no cambiar a público para evitar el error.                                                    |
 | El informador no recibe email                           | Notificaciones de cliente, preferencias o reglas de JSM                                | Verificar primero publicación pública; no afirmar entrega ni reenviar automáticamente.                                     |
@@ -4251,28 +4348,99 @@ opciones completas del plugin. No reiniciar o borrar bases de datos como primera
 ### 11.3. Rotación de tokens
 
 1. Crear el token nuevo con permisos mínimos y expiración apropiada.
-2. Sustituir el secreto de forma segura y, preferiblemente, atómica.
-3. Invalidar la caché de credenciales; probar una lectura autenticada.
-4. Invalidar propuestas si ha cambiado la identidad o el alcance efectivo.
-5. Revocar el token anterior y eliminar copias temporales.
+2. Sustituir el secreto de forma segura y, preferiblemente, atómica, manteniendo el material de recuperación estrictamente
+   protegido mientras se valida la sustitución. No copiarlo al chat, a logs o al manifiesto del instalador.
+3. Invalidar la caché de credenciales; probar una lectura autenticada con el perfil y confirmar sitio e identidad.
+   Comprobar el alcance aplicable a las operaciones previstas: una lectura correcta no acredita todos los permisos de escritura.
+4. Invalidar las propuestas aún no ejecutadas si ha cambiado la identidad o el alcance efectivo. Para ejecuciones en curso,
+   parciales o inciertas, conservar plan y progreso y revisar también esos cambios antes de continuar; las referencias temporales
+   JSM permanecen vinculadas a la identidad que realizó la carga.
+5. En una rotación ordinaria, revocar el token anterior sólo tras comprobar satisfactoriamente la sustitución y el tratamiento
+   de las operaciones pendientes. Eliminar de forma segura las copias temporales de credenciales que ya no se necesiten.
 
 La rotación de un token no debe requerir recompilar el plugin ni modificar los prompts. La sustitución de un archivo referenciado
 no tiene por qué activar el watcher de OpenCode: el resolvedor del plugin debe releerlo o invalidarlo explícitamente.
 
+Renovar el secreto sin cambiar la identidad no convierte el plan en editable ni exige modificar su hash por los bytes del token:
+se revalidan identidad, política y permisos según 6.6. Si hay compromiso de una credencial, priorizar su revocación y contener
+las operaciones afectadas; el procedimiento de rotación ordinaria no justifica mantener activo un secreto comprometido.
+
 ### 11.4. Métricas y reconciliación
 
-Medir peticiones, latencia, 429, fallos por cuenta, propuestas preparadas/aplicadas/rechazadas, conflictos y resultados inciertos.
-Usar etiquetas de baja cardinalidad; no poner texto del ticket en métricas.
+#### Observación y separación de registros
 
-Ante un resultado incierto:
+Medir peticiones, latencia, 429, fallos por cuenta, propuestas preparadas/aplicadas/rechazadas, conflictos y resultados inciertos.
+Medir por separado resultados y fallos de instalación, actualización y desinstalación. Usar etiquetas de baja cardinalidad;
+no poner texto del ticket, IDs de petición, hashes o rutas personales en etiquetas de métricas. Esas referencias pueden
+correlacionarse en los registros protegidos que correspondan, con la minimización de 7.6.
+
+La recuperación utiliza dos conjuntos distintos de datos:
+
+| Ámbito | Evidencia principal | Qué no demuestra |
+| --- | --- | --- |
+| Instalador | Manifiesto, progreso local, archivos y configuración efectiva. | No acredita que una operación se haya ejecutado en Jira. |
+| Escrituras Jira | Plan inmutable, registro de ejecución, recibos y comprobaciones remotas. | No se resuelve reinstalando el paquete ni restaurando una configuración. |
+
+#### Reconciliar una escritura remota
+
+Ante `WRITE_OUTCOME_UNKNOWN`, una ejecución recuperada en `applying` o un progreso parcial:
+
+1. **Detener los reenvíos del plan afectado.** No devolverlo a `prepared` ni crear otro cambio equivalente para «asegurar»
+   que se ejecutó. Las lecturas de comprobación autorizadas siguen siendo posibles.
+2. **Localizar la operación.** Relacionar `requestId`, `proposalId`, hash, cuenta, sitio, ticket e identidad con el plan,
+   registro y recibos persistidos. Verificar su integridad y el contexto confiable del servidor. Investigar una ejecución no
+   autoriza a aplicarla desde otra sesión o ubicación.
+3. **Examinar cada paso bajo la coordinación del servicio.** No competir con una ejecución que todavía está activa.
+   Separar pasos confirmados, fallidos y no resueltos. Un paso que quedó en `sending` durante una caída se trata como incierto,
+   no como un envío inexistente. Un fallo posterior tampoco deshace automáticamente las fases confirmadas.
+4. **Contrastar con Jira mediante lecturas autorizadas.** Utilizar IDs y recibos disponibles y las comprobaciones por tipo
+   indicadas más abajo. No ampliar audiencia o acceso, descargar contenido ni cambiar de identidad silenciosamente para investigar.
+5. **Registrar la conclusión verificable.** El flujo de recuperación del servicio actualiza atómicamente el registro y los
+   recibos, manteniendo el plan y su hash. Marcar `applied` sólo con confirmación y verificación suficientes de todos los
+   efectos previstos. Si no basta la evidencia, mantener la incertidumbre y pedir revisión humana; no editar directamente
+   la base de datos para forzar un éxito.
+6. **Decidir si existe continuación válida.** No repetir pasos confirmados. Revalidar identidad, contexto, política, vigencia
+   de referencias y aprobación aplicable antes de cualquier envío pendiente. Conservar datos tras vencer el TTL no renueva
+   la autorización. Si hace falta otro plan, su alcance se limita a lo que se haya determinado que resta y exige revisión y
+   autorización propias; no transforma un resultado desconocido en permiso para duplicarlo.
+7. **Comunicar el resultado por partes.** Indicar qué está confirmado, qué falló, qué sigue incierto y qué decisión falta.
+   Conservar las evidencias y copias necesarias según 7.6; caducar una propuesta no es una orden de borrado.
+
+Comprobaciones específicas:
 
 - Campos: leer los campos afectados y comparar con lo esperado, sin confundir coincidencia con prueba absoluta de autoría.
 - Comentarios: inspeccionar comentarios recientes y el recibo disponible. Si no se puede identificar con certeza el comentario,
   pedir revisión humana.
 - Transiciones: comprobar estado e historial disponible; las automatizaciones pueden haber movido el ticket otra vez.
 - Adjuntos: comprobar IDs retornados, ficheros confirmados y fase de publicación JSM. Coincidir en nombre/tamaño no prueba por sí
-  solo identidad; usar hashes cuando se pueda verificar el contenido. No reintentar un lote completo si parte ya se publicó.
-- No prometer rollback automático. Una compensación es otro cambio, con su propia propuesta y autorización.
+  solo identidad; usar hashes cuando se pueda verificar el contenido con sus permisos de transferencia. Una referencia temporal
+  JSM no acredita publicación: comprobar identidad que cargó, servicio, vigencia y asociación de los IDs con los archivos del plan.
+
+No existe en el catálogo una herramienta genérica de reconciliación. El modelo puede solicitar las consultas disponibles y
+explicar sus límites; la recuperación y persistencia de la conclusión corresponden al servicio y, si procede, al operador.
+No inventar comandos o herramientas para reanudar un envío. El
+[escenario E15](plugin-jira-opencode-escenarios.md#e15-gestionar-una-carga-parcialmente-confirmada) muestra esta distinción.
+No prometer rollback automático: una compensación es otro cambio, con su propia propuesta y autorización.
+
+#### Recuperar una instalación o retirada interrumpida
+
+1. Identificar el origen confiable del paquete, sus rutas y el manifiesto de instalación. Si el CLI está disponible, ejecutar
+   `check --global` por su ruta real como en 11.1. Si falta o está incompleto, obtener un CLI confiable mediante el recorrido
+   local o publicado de 8.1–8.2; no cargar código desconocido para reparar la instalación.
+2. Leer el progreso registrado y contrastarlo con los archivos existentes: distinguir paquete preparado, copia activada,
+   instrucciones, referencias de configuración y pasos de retirada. No inferir éxito completo por un archivo aislado.
+3. Preservar la configuración utilizable y el trabajo del usuario. Antes de restaurar o completar una escritura, detectar
+   cambios concurrentes y revisar las copias de seguridad con acceso restringido. No restaurar todo un JSONC sobre ediciones
+   posteriores ni borrar archivos por el mero hecho de no figurar en un manifiesto incompleto.
+4. Aplicar las garantías de 6.9 y 8.5 al recorrido de instalación o desinstalación correspondiente. Presentar el plan pendiente
+   y pedir aceptación cuando corresponda. Si hay propiedad de archivos o decisiones de permisos ambiguas, detenerse para
+   revisión; no hay una orden genérica de reparación que autorice sobrescribirlas.
+5. Conservar propuestas, registros y recibos remotos, staging y credenciales fuera del paquete reemplazable. Si hay operaciones
+   Jira pendientes, resolver su continuidad de forma coordinada antes de sustituir componentes que necesitan; reparar el
+   instalador no autoriza a reenviarlas.
+6. Volver a comprobar los componentes y después su carga en OpenCode según 11.1. Informar de lo reparado y lo pendiente sin
+   anunciar una instalación o desinstalación completa si quedan pasos sin resolver. No probar conexión con Jira sin una cuenta
+   real y una operación de lectura autorizada.
 
 ## 12. Plan de desarrollo
 
