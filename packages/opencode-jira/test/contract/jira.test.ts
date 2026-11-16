@@ -7,19 +7,19 @@ beforeEach(() => { vi.stubEnv("IK_TEST_WORK", "work-secret"); vi.stubEnv("IK_TES
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Jira Platform reads", () => {
-  it("searches with bounded generated JQL, fields and an opaque scoped cursor", async () => {
+  it("[5.4][E02][BU-01] searches bounded JQL with an opaque scoped cursor", async () => {
     const c = config(); let count = 0;
     const fetcher = mockFetch((url, init) => {
       expect(url.pathname).toBe("/rest/api/3/search/jql");
       const body = JSON.parse(String(init.body));
-      expect(body.jql).toBe('project = "IK" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC, key ASC');
+      expect(body.jql).toBe('(project = "IK" AND assignee = currentUser() AND statusCategory != Done) AND project NOT IN ("OTHER") ORDER BY updated DESC, key ASC');
       expect(body.fields).toEqual(expect.arrayContaining(["summary", "status", "updated", "project"]));
       if (++count === 1) return json({ issues: [issue()], nextPageToken: "next-token", isLast: false });
       expect(body.nextPageToken).toBe("next-token");
       return json({ issues: [], isLast: true });
     });
     const provider = new JiraCloud(c, new HttpClient(c, fetcher));
-    const input = { account: "work", project: "IK", assignee: "me" as const, statusCategory: "notDone" as const, maxResults: 2 };
+    const input = { account: "work", jql: 'project = "IK" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC, key ASC', maxResults: 2 };
     const first = await provider.search(c.accounts[0]!, input, signal());
     expect(first.data.isLast).toBe(false); expect(first.data.cursor).not.toContain("next-token");
     await expect(provider.search(c.accounts[1]!, { ...input, account: "client", cursor: first.data.cursor }, signal())).rejects.toMatchObject({ code: "CURSOR_INVALID" });
@@ -31,12 +31,12 @@ describe("Jira Platform reads", () => {
   it("rejects repeated search tokens and disallowed returned projects", async () => {
     const c = config(); const fetcher = mockFetch(() => json({ issues: [issue()], nextPageToken: "same" }));
     const provider = new JiraCloud(c, new HttpClient(c, fetcher));
-    const input = { account: "work", project: "IK" };
+    const input = { account: "work", jql: "project = IK" };
     const first = await provider.search(c.accounts[0]!, input, signal());
     await expect(provider.search(c.accounts[0]!, { ...input, cursor: first.data.cursor }, signal())).rejects.toMatchObject({ code: "CURSOR_INVALID" });
     fetcher.mockImplementation(async () => json({ issues: [issue("OTHER-1", "OTHER")] }));
-    await expect(provider.search(c.accounts[0]!, input, signal())).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(provider.search(c.accounts[0]!, { ...input, project: "OTHER" }, signal())).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await provider.search(c.accounts[0]!, input, signal())).data.values).toEqual([]);
+    expect((await provider.search(c.accounts[0]!, { ...input, jql: "project = OTHER" }, signal())).data.values).toEqual([]);
     provider.close();
   });
   it("preserves canonical ID/key, minimizes identities and checks the real project", async () => {
@@ -45,10 +45,9 @@ describe("Jira Platform reads", () => {
     const result = await provider.get(c.accounts[0]!, { account: "work", issueKey: "IK-1" }, signal(), authorize);
     expect(result.data).toMatchObject({ id: "10001", key: "IK-2", account: "work", url: "https://example.atlassian.net/browse/IK-2", descriptionText: "Untrusted text" });
     expect(JSON.stringify(result)).not.toContain("emailAddress");
-    expect(authorize).toHaveBeenCalledWith("IK-2");
+    expect(authorize).toHaveBeenCalledWith("IK-2", "IK");
     fetcher.mockImplementation(async () => json(issue("OTHER-1", "OTHER")));
     await expect(provider.get(c.accounts[0]!, { account: "work", issueKey: "IK-1" }, signal())).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(provider.get(c.accounts[0]!, { account: "work", issueKey: "IK-1", fields: ["customfield_123"] }, signal())).rejects.toMatchObject({ code: "FORBIDDEN" });
     provider.close();
   });
   it("keeps accounts explicit even for identical keys on one site", async () => {
@@ -64,8 +63,8 @@ describe("Jira Platform reads", () => {
     expect(identities).toEqual(["work@example.com:work-secret", "client@example.com:client-secret"]);
     provider.close();
   });
-  it("returns custom fields only when configured and explicitly selected", async () => {
-    const c = config(); c.accounts[0]!.allowedReadFields.push("customfield_10042");
+  it("[5.5][E03][LE-02] returns custom fields only when explicitly selected", async () => {
+    const c = config();
     const fetcher = mockFetch(() => json({ ...issue(), fields: { ...issue().fields, customfield_10042: { value: "approved" }, customfield_99999: "not-authorized" } }));
     const provider = new JiraCloud(c, new HttpClient(c, fetcher));
     const result = await provider.get(c.accounts[0]!, { account: "work", issueKey: "IK-1", fields: ["customfield_10042"] }, signal());
@@ -103,6 +102,19 @@ describe("Jira Platform reads", () => {
 });
 
 describe("JSM agent/customer contract", () => {
+  it.each([
+    { start: 1, limit: 25, size: 0, isLastPage: true, values: [] },
+    { start: 0, limit: 25, size: 2, isLastPage: true, values: [] },
+    { start: 0, limit: 25, size: 0, isLastPage: false, values: [] },
+    { start: 0, limit: 1, size: 2, isLastPage: true, values: [{ id: "a", body: "x", public: true }, { id: "b", body: "x", public: true }] },
+  ])("[10.2][E03][HT-05] rejects inconsistent JSM pages (%#)", async (page) => {
+    const c = config(true);
+    const fetcher = mockFetch((url) => url.pathname.endsWith("/comment") ? json(page) : url.pathname.includes("/api/3/issue/") ? json(issue()) : json(request()));
+    const provider = new JiraCloud(c, new HttpClient(c, fetcher));
+    try {
+      await expect(provider.comments(c.accounts[0]!, { account: "work", issueKey: "IK-1" }, signal())).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    } finally { provider.close(); }
+  });
   it("detects a request and filters public/internal comments without fallback", async () => {
     const c = config(true); const calls: string[] = [];
     const fetcher = mockFetch((url) => {
@@ -157,7 +169,7 @@ describe("JSM agent/customer contract", () => {
     const c = config(true); const paths: string[] = [];
     const fetcher = mockFetch((url) => { paths.push(url.pathname); return url.pathname.includes("/api/3/issue/") ? json(issue()) : json({}, status); });
     const provider = new JiraCloud(c, new HttpClient(c, fetcher));
-    await expect(provider.comments(c.accounts[0]!, { account: "work", issueKey: "IK-1" }, signal())).rejects.toMatchObject({ code: status === 403 ? "FORBIDDEN" : "CAPABILITY_NOT_SUPPORTED" });
+    await expect(provider.comments(c.accounts[0]!, { account: "work", issueKey: "IK-1" }, signal())).rejects.toMatchObject({ code: "CAPABILITY_NOT_SUPPORTED" });
     expect(paths).not.toContain("/rest/api/3/issue/IK-1/comment"); provider.close();
   });
   it("preserves the scoped gateway for JSM and accepts only its own metadata prefix", async () => {

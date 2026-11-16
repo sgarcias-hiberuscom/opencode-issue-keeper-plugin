@@ -1,9 +1,15 @@
 name: Jira read plugin
 on:
   push:
-    paths: ["packages/opencode-jira/**", ".github/workflows/jira-read.yml"]
+    paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/jira-read.yml"]
   pull_request:
-    paths: ["packages/opencode-jira/**", ".github/workflows/jira-read.yml"]
+    paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/jira-read.yml"]
+  workflow_dispatch:
+    inputs:
+      live:
+        description: Ejecutar integración real autorizada
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -25,7 +31,75 @@ jobs:
       - run: mkdir -p /tmp/opencode
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - run: node scripts/versions.mjs
+      - run: npm run test:mock
       - run: npm run build
+      - run: git diff --exit-code -- options.schema.json
       - run: npm pack --dry-run
       - run: npm run test:pack
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jira-mock-node-${{ matrix.node }}
+          path: packages/opencode-jira/reports/mock/
+  installer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/opencode-jira
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: mkdir -p /tmp/opencode
+      - run: npm ci
+      - run: npm run build
+      - name: Isolated installer without Jira access
+        run: |
+          export HOME="$(mktemp -d /tmp/opencode/installer-home.XXXXXX)"
+          export XDG_CONFIG_HOME="$HOME/config"
+          export XDG_DATA_HOME="$HOME/data"
+          export NODE_OPTIONS="--import=$(pwd)/scripts/no-jira.mjs"
+          npm run test:installer
+          npm run test:pack
+  live:
+    if: github.event_name == 'workflow_dispatch' && inputs.live && github.event.repository.fork == false
+    environment: jira-integration
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/opencode-jira
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: mkdir -p /tmp/opencode
+      - run: npm ci
+      - name: Authorized inventory
+        env:
+          OPTIONS: ${{ secrets.JIRA_LIVE_OPTIONS }}
+          INVENTORY: ${{ secrets.JIRA_LIVE_INVENTORY }}
+        run: |
+          umask 077
+          test -n "$OPTIONS"
+          test -n "$INVENTORY"
+          printf '%s' "$OPTIONS" > /tmp/opencode/live-options.json
+          printf '%s' "$INVENTORY" > /tmp/opencode/live-inventory.json
+      - run: npm run test:live
+        env:
+          ISSUEKEEPER_LIVE_READS: "1"
+          ISSUEKEEPER_LIVE_DOWNLOADS: "1"
+          ISSUEKEEPER_LIVE_CONFIG: /tmp/opencode/live-options.json
+          ISSUEKEEPER_LIVE_INVENTORY: /tmp/opencode/live-inventory.json
+          JIRA_WORK_API_TOKEN: ${{ secrets.JIRA_WORK_API_TOKEN }}
+          JIRA_CLIENT_API_TOKEN: ${{ secrets.JIRA_CLIENT_API_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jira-live
+          path: packages/opencode-jira/reports/live/
+      - name: Remove private inventory
+        if: always()
+        run: rm -f /tmp/opencode/live-options.json /tmp/opencode/live-inventory.json

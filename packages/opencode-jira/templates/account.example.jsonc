@@ -1,0 +1,11 @@
+{
+  "id": "trabajo",
+  "label": "Mi conexión Jira",
+  "siteUrl": "https://empresa.atlassian.net",
+  "auth": {
+    "mode": "cloud-token",
+    "email": "usuario@example.com",
+    "tokenFile": "/home/usuario/.config/issuekeeper/secrets/trabajo.token"
+  },
+  "readOnly": true
+}

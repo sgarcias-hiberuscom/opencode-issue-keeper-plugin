@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import type { Plugin } from "@opencode/plugin";
 import plugin from "../../src/index.js";
-import { Service } from "../../src/core/service.js";
 import { registerReads } from "../../src/tools/reads.js";
-import { attachment, config, issue, json, mockFetch } from "../helpers.js";
+import { createService, attachment, config, issue, json, mockFetch } from "../helpers.js";
 
 type Context = Parameters<Plugin.Plugin["setup"]>[0];
 type Editor = Parameters<Parameters<Context["tool"]["transform"]>[0]>[0];
@@ -33,17 +32,17 @@ function harness() {
 }
 
 describe("native OpenCode V2 contract", () => {
-  it("loads the pinned SDK and registers only seven read/download tools without network calls", async () => {
+  it("[6.7][E00][IN-04] registers eight read tools without network calls", async () => {
     const h = harness();
     const cleanup = await plugin.setup(h.context);
     expect(plugin.id).toBe("issuekeeper.jira");
-    expect([...h.tools.keys()].sort()).toEqual(["accounts_list", "attachment_download", "attachments_list", "comments_list", "connection_test", "issue_get", "issues_search"]);
+    expect([...h.tools.keys()].sort()).toEqual(["accounts_list", "attachment_download", "attachments_list", "comments_list", "connection_test", "issue_get", "issues_search", "mention_candidates"]);
     for (const tool of h.tools.values()) expect(tool.options?.namespace).toBe("jira");
     expect(h.assert).not.toHaveBeenCalled();
     await cleanup?.();
   });
   it("registers even when one secret is missing and hides all token sources", async () => {
-    const h = harness(); const service = await Service.create(config(), location, mockFetch(() => { throw new Error("must not connect"); }));
+    const h = harness(); const service = await createService(config(), location, mockFetch(() => { throw new Error("must not connect"); }));
     try {
       await registerReads(h.context, service);
       const result = await h.invoke("accounts_list", {});
@@ -54,7 +53,7 @@ describe("native OpenCode V2 contract", () => {
   });
   it("propagates permission rejection, without issuing an HTTP call", async () => {
     const h = harness(); const denial = new Error("native OpenCode rejection"); h.assert.mockRejectedValue(denial);
-    const fetcher = mockFetch(() => json(issue())); const service = await Service.create(config(), location, fetcher);
+    const fetcher = mockFetch(() => json(issue())); const service = await createService(config(), location, fetcher);
     try {
       await registerReads(h.context, service);
       await expect(h.invoke("issue_get", { account: "work", issueKey: "IK-1" })).rejects.toBe(denial);
@@ -63,7 +62,7 @@ describe("native OpenCode V2 contract", () => {
   });
   it("returns safe operational errors and valid explicitly truncated JSON", async () => {
     const h = harness(); const c = config(); c.output.maxTextChars = 10;
-    const service = await Service.create(c, location, mockFetch(() => json({ ...issue(), fields: { ...issue().fields, summary: "x".repeat(100) } })));
+    const service = await createService(c, location, mockFetch(() => json({ ...issue(), fields: { ...issue().fields, summary: "x".repeat(100) } })));
     try {
       await registerReads(h.context, service);
       const result = await h.invoke("issue_get", { account: "work", issueKey: "IK-1" });
@@ -79,9 +78,9 @@ describe("native OpenCode V2 contract", () => {
   it("requires jira.download and edit before any binary transfer", async () => {
     const h = harness(); const denial = new Error("local edit rejected");
     h.assert.mockImplementation(async (input) => { if ((input as { action: string }).action === "edit") throw denial; });
-    const fetcher = mockFetch((url) => url.searchParams.get("fields") === "attachment,project"
+    const fetcher = mockFetch((url) => url.pathname === "/rest/api/3/attachment/101" ? json(attachment) : url.searchParams.get("fields") === "attachment,project"
       ? json({ id: "10001", fields: { project: issue().fields.project, attachment: [attachment] } }) : json(issue()));
-    const service = await Service.create(config(), location, fetcher);
+    const service = await createService(config(), location, fetcher);
     try {
       await registerReads(h.context, service);
       await expect(h.invoke("attachment_download", { account: "work", issueKey: "IK-1", attachmentId: "101" })).rejects.toBe(denial);

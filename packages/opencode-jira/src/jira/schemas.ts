@@ -2,8 +2,8 @@ import { z } from "zod";
 import { invalidResponse } from "../errors.js";
 
 export const Id = z.string().min(1).max(200);
-export const UserSchema = z.object({ accountId: Id, displayName: z.string().optional() });
-export const ProjectSchema = z.object({ id: Id, key: z.string().regex(/^[A-Z][A-Z0-9_]*$/) });
+export const UserSchema = z.object({ accountId: Id, displayName: z.string().optional(), active: z.boolean().optional() });
+export const ProjectSchema = z.object({ id: Id, key: z.string().regex(/^[A-Z][A-Z0-9_]*$/), projectTypeKey: z.string().optional() });
 export const IssueSchema = z.object({
   id: Id, key: z.string().regex(/^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/),
   fields: z.object({
@@ -23,13 +23,16 @@ export const RequestSchema = z.object({
 });
 export const PlatformAttachment = z.object({
   id: z.string().regex(/^[1-9][0-9]*$/), filename: z.string().min(1), size: z.number().int().nonnegative(), mimeType: z.string(),
+  author: UserSchema.optional(), created: z.string().optional(),
 });
 export const JsmAttachment = PlatformAttachment.omit({ id: true }).extend({
   _links: z.object({ jiraRest: z.string() }),
+  created: z.union([z.string(), z.object({ iso8601: z.string() }).transform((v) => v.iso8601)]).optional(),
 });
 export const PlatformComment = z.object({
   id: Id, body: z.unknown(), author: UserSchema.optional(), created: z.string().optional(),
   visibility: z.object({ type: z.string(), value: z.string() }).optional(),
+  jsdPublic: z.boolean().optional(),
 });
 export const JsmComment = z.object({
   id: Id, body: z.string(), public: z.boolean(), author: UserSchema.optional(),

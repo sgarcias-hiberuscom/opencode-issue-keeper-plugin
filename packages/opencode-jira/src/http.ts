@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Account, Config } from "./config.js";
 import { authorization } from "./credentials.js";
 import { cancellation, httpError, invalidResponse, IssueKeeperError } from "./errors.js";
+import { operations } from "./core/operation.js";
 
 class Semaphore {
   private active = 0;
@@ -17,13 +18,16 @@ class Semaphore {
         const abort = () => {
           const index = this.waiting.indexOf(wake);
           if (index !== -1) this.waiting.splice(index, 1);
-          reject(new IssueKeeperError("CANCELLED", "Espera cancelada."));
+          reject(signal.reason);
         };
         signal.addEventListener("abort", abort, { once: true });
         this.waiting.push(wake);
       });
     } else this.active++;
+    let released = false;
     return () => {
+      if (released) return;
+      released = true;
       const next = this.waiting.shift();
       if (next) next();
       else this.active--;
@@ -33,7 +37,7 @@ class Semaphore {
 
 export function apiUrl(account: Account, path: string): URL {
   // An allowlist also makes this transport incapable of sending arbitrary remote mutations.
-  if (!/^rest\/(?:api\/3\/(?:myself|search\/jql|issue\/[A-Z][A-Z0-9_]*-[1-9][0-9]*(?:\/comment)?|attachment\/content\/[0-9]+)|servicedeskapi\/request\/[A-Z][A-Z0-9_]*-[1-9][0-9]*(?:\/comment|\/attachment(?:\/[0-9]+)?)?)(?:\?[^#\\]*)?$/.test(path)
+  if (!/^rest\/(?:api\/3\/(?:myself|user\/viewissue\/search|search\/jql|issue\/[A-Z][A-Z0-9_]*-[1-9][0-9]*(?:\/comment)?|attachment\/(?:content\/)?[0-9]+)|servicedeskapi\/(?:servicedesk|request\/[A-Z][A-Z0-9_]*-[1-9][0-9]*(?:\/comment|\/participant|\/attachment(?:\/[0-9]+)?)?))(?:\?[^#\\]*)?$/.test(path)
     || /[\r\n]/.test(path)) throw new IssueKeeperError("VALIDATION_FAILED", "Ruta de API no autorizada.");
   const root = account.auth.mode === "cloud-scoped-token"
     ? `https://api.atlassian.com/ex/jira/${encodeURIComponent(account.auth.cloudId)}/`
@@ -81,12 +85,36 @@ export async function readJson(response: Response, limit: number, signal: AbortS
 export class HttpClient {
   private readonly shutdown = new AbortController();
   private readonly sites = new Map<string, Semaphore>();
+  private readonly accounts = new Map<string, Semaphore>();
   constructor(private readonly config: Config, private readonly fetcher: typeof fetch = fetch) {}
 
   close(): void { this.shutdown.abort(); }
 
   json(account: Account, path: string, signal: AbortSignal, search?: unknown): Promise<unknown> {
     return this.read(account, path, signal, (response, combined) => readJson(response, this.config.http.maxResponseBytes, combined), search);
+  }
+
+  async tenant(account: Account, signal: AbortSignal): Promise<unknown> {
+    const timeout = AbortSignal.timeout(this.config.http.timeoutMs);
+    const combined = AbortSignal.any([signal, this.shutdown.signal, timeout]);
+    try {
+      cancellation(combined);
+      const operation = operations.getStore();
+      if (operation) operation.attempts++;
+      const response = await this.fetcher(`${account.siteUrl}/_edge/tenant_info`, { method: "GET", headers: { Accept: "application/json" }, redirect: "manual", signal: combined });
+      if (operation) operation.status = response.status;
+      try {
+        if (response.status >= 300 && response.status < 400) throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección JSON no autorizada.");
+        if (!response.ok) throw httpError(response.status);
+        return await readJson(response, this.config.http.maxResponseBytes, combined);
+      } finally { await response.body?.cancel().catch(() => {}); }
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      if (this.shutdown.signal.aborted) throw this.shutdown.signal.reason;
+      if (timeout.aborted) throw new IssueKeeperError("TIMEOUT", "Tiempo de comprobación del sitio agotado.");
+      if (error instanceof IssueKeeperError) throw error;
+      throw new IssueKeeperError("NETWORK_ERROR", "No se pudo comprobar el sitio.");
+    }
   }
 
   async read<T>(
@@ -103,15 +131,23 @@ export class HttpClient {
     timer.unref();
     const combined = AbortSignal.any([signal, this.shutdown.signal, timeout.signal]);
     let release: (() => void) | undefined;
+    let releaseAccount: (() => void) | undefined;
     try {
+      cancellation(combined);
       let queue = this.sites.get(account.siteUrl);
       if (!queue) { queue = new Semaphore(this.config.http.maxConcurrentPerAccount); this.sites.set(account.siteUrl, queue); }
-      release = await queue.acquire(combined);
+      let accountQueue = this.accounts.get(account.id);
+      if (!accountQueue) { accountQueue = new Semaphore(this.config.http.maxConcurrentPerAccount); this.accounts.set(account.id, accountQueue); }
       const auth = await authorization(account);
       const attempts = binary ? 1 : this.config.http.readMaxAttempts;
       for (let attempt = 1; ; attempt++) {
         cancellation(combined);
         try {
+          releaseAccount = await accountQueue.acquire(combined);
+          release = await queue.acquire(combined);
+          cancellation(combined);
+          const operation = operations.getStore();
+          if (operation) operation.attempts++;
           const response = await this.fetcher(url, {
             method: search === undefined ? "GET" : "POST",
             headers: {
@@ -119,15 +155,16 @@ export class HttpClient {
               ...(search === undefined ? {} : { "Content-Type": "application/json" }),
             },
             ...(search === undefined ? {} : { body: JSON.stringify(search) }),
-            redirect: binary ? "manual" : "error", signal: combined,
+            redirect: "manual", signal: combined,
           });
+          if (operation) operation.status = response.status;
           if (response.status >= 300 && response.status < 400) {
             await response.body?.cancel();
-            throw new IssueKeeperError("FORBIDDEN", "Redirección bloqueada: no se ha validado un destino de medios autorizado.");
+            throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
           }
           if (!response.ok) {
             await response.body?.cancel();
-            throw httpError(response.status, retryAfter(response.headers.get("retry-after")));
+            throw httpError(response.status, retryAfter(response.headers.get("retry-after")), path.startsWith("rest/servicedeskapi/"));
           }
           try { return await consume(response, combined); }
           finally { await response.body?.cancel().catch(() => {}); }
@@ -138,14 +175,20 @@ export class HttpClient {
           if (!error.retryable || attempt >= attempts) throw error;
           const wait = Math.max((error.retryAfterSeconds ?? 0) * 1000, 250 * 2 ** (attempt - 1) + Math.random() * 250);
           if (Date.now() + wait >= deadline) throw error;
+          release?.(); release = undefined;
+          releaseAccount?.(); releaseAccount = undefined;
           await delay(wait, undefined, { signal: combined });
+        } finally {
+          release?.(); release = undefined;
+          releaseAccount?.(); releaseAccount = undefined;
         }
       }
     } catch (cause) {
-      if (signal.aborted || this.shutdown.signal.aborted) throw new IssueKeeperError("CANCELLED", "Operación cancelada.");
+      if (signal.aborted) throw signal.reason;
+      if (this.shutdown.signal.aborted) throw this.shutdown.signal.reason;
       if (timeout.signal.aborted) throw new IssueKeeperError("TIMEOUT", "Se agotó el tiempo de lectura; reduzca el alcance.", true);
       if (cause instanceof IssueKeeperError) throw cause;
       throw new IssueKeeperError("NETWORK_ERROR", "Fallo de red al leer Jira.", true);
-    } finally { clearTimeout(timer); release?.(); }
+    } finally { clearTimeout(timer); release?.(); releaseAccount?.(); }
   }
 }

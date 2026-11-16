@@ -35,12 +35,12 @@ describe("safe HTTP", () => {
   });
   it("never follows redirects or forwards authorization", async () => {
     const c = config(); const fetcher = mockFetch((_, init) => {
-      expect(init.redirect).toBe("error");
+      expect(init.redirect).toBe("manual");
       expect((init.headers as Record<string, string>).Authorization).toMatch(/^Basic /);
       return new Response(null, { status: 303, headers: { location: "https://evil.com/private-secret" } });
     });
     const http = new HttpClient(c, fetcher);
-    await expect(http.json(c.accounts[0]!, "rest/api/3/myself", signal())).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(http.json(c.accounts[0]!, "rest/api/3/myself", signal())).rejects.toMatchObject({ code: "REDIRECT_NOT_ALLOWED" });
     expect(fetcher).toHaveBeenCalledTimes(1); http.close();
   });
   it("respects Retry-After exceeding the deadline and parses dates", async () => {
@@ -69,9 +69,9 @@ describe("safe HTTP", () => {
     const http = new HttpClient(c, fetcher);
     await expect(http.json(c.accounts[0]!, "rest/api/3/myself", signal())).rejects.toMatchObject({ code: "TIMEOUT" });
     const controller = new AbortController(); controller.abort();
-    await expect(http.json(c.accounts[0]!, "rest/api/3/myself", controller.signal)).rejects.toMatchObject({ code: "CANCELLED" });
+    await expect(http.json(c.accounts[0]!, "rest/api/3/myself", controller.signal)).rejects.toBe(controller.signal.reason);
     http.close();
-    await expect(http.json(c.accounts[0]!, "rest/api/3/myself", signal())).rejects.toMatchObject({ code: "CANCELLED" });
+    await expect(http.json(c.accounts[0]!, "rest/api/3/myself", signal())).rejects.toMatchObject({ name: "AbortError" });
   });
   it("shares site concurrency between profiles and cancels queued calls", async () => {
     vi.stubEnv("IK_TEST_CLIENT", "other-secret");
@@ -86,7 +86,7 @@ describe("safe HTTP", () => {
     const controller = new AbortController();
     const second = http.json(c.accounts[1]!, "rest/api/3/myself", controller.signal);
     controller.abort();
-    await expect(second).rejects.toMatchObject({ code: "CANCELLED" });
+    await expect(second).rejects.toBe(controller.signal.reason);
     expect(fetcher).toHaveBeenCalledTimes(1);
     finish(); await first; http.close();
   });

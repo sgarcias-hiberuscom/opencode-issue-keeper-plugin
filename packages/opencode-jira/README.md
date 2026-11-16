@@ -1,244 +1,244 @@
-# IssueKeeper Jira — fase 1
+# IssueKeeper Jira — base y lectura
 
-Plugin de **servidor OpenCode V2**, privado y de sólo lectura remota. No registra
-preparación/aplicación de cambios, comentarios nuevos, cargas ni transiciones.
-La descarga escribe únicamente en el disco del servidor, con permisos explícitos.
+Plugin privado de servidor **OpenCode V2**. Ocho herramientas de lectura y
+descarga local; ninguna preparación, carga, transición o escritura remota.
+La implementación y las evidencias no equivalen al cierre de la fase:
+véase [estado y trazabilidad](../../validation/phase-1.md).
 
-## Alcance de la implementación
+## Instalar
 
-El paquete ofrece las siete herramientas de lectura y descarga del
-[catálogo registrado](#herramientas-registradas), configuración de ejemplo,
-esquema de opciones, comandos de consulta y pruebas simuladas multicuenta/JSM.
-La búsqueda utiliza filtros estructurados, no JQL libre; la descarga segura
-requiere Linux y rechaza redirecciones a medios no validados.
-
-La resolución de candidatos mediante `jira_mention_candidates`, la publicación
-de menciones, los comentarios enriquecidos y el instalador global no forman
-parte de las capacidades disponibles descritas en este README. El
-[plan de desarrollo](../../doc/plugin-jira-opencode.md#12-plan-de-desarrollo)
-define sus requisitos y condiciones de cierre; disponer de este paquete no
-acredita haber completado esa fase del plan.
-
-La validación real con Jira, identidades agente/cliente y modelos requiere
-un entorno autorizado y evidencias de ejecución. Las pruebas simuladas no
-sustituyen esa comprobación; véanse [Pruebas](#pruebas) y las instrucciones
-de integración real de este README.
-
-## Instalación local
-
-Desde la raíz de IssueKeeper:
+Requiere Node >=22, npm y `tar`; la descarga segura requiere Linux.
 
 ```bash
 npm --prefix packages/opencode-jira ci
-npm --prefix packages/opencode-jira run typecheck
-npm --prefix packages/opencode-jira test
 npm --prefix packages/opencode-jira run build
-npm --prefix packages/opencode-jira run test:pack
+npm --prefix packages/opencode-jira run install:global
 ```
 
-Incorpora las entradas de [opencode.example.jsonc](./opencode.example.jsonc) a tu
-`opencode.jsonc` de la raíz **sin reemplazar configuración existente**. Sustituye
-sitio, identidad, proyectos y referencias al secreto. Para uso global, emplea una
-ruta absoluta al directorio del paquete. No apuntes directamente a `dist/index.js`
-ni dupliques la carga por descubrimiento automático. Este paquete no está publicado.
+Desde un tarball ya construido:
 
-Guarda y usa `/reload` si es necesario; no hay que reiniciar el servicio por una
-configuración normal. Reconstruye `dist` tras editar TypeScript. Los comandos
-`/jira-get trabajo IK-123` y `/jira-list trabajo mis tickets abiertos del proyecto IK`
-no fijan modelo ni agente; son plantillas, no barreras de seguridad.
+```bash
+npm exec --package=/ruta/issuekeeper-opencode-jira-0.1.0.tgz -- issuekeeper-jira install --global --source /ruta/issuekeeper-opencode-jira-0.1.0.tgz
+```
 
-### Secretos
+El instalador muestra el plan y requiere aceptación en una terminal interactiva.
+No hay aprobación implícita ni `--yes`. Sin `--source`, informa de que la
+instalación desde registro aún no está disponible. No contacta Jira ni lee tokens.
 
-- Una fuente por cuenta: `tokenFile` absoluto o **nombre** de `tokenEnv`.
-- Nunca pegues el token en el chat, JSON de opciones, resultados o repositorio.
-- Archivo regular, sin symlink final, del usuario del servidor y modo `0600` (o más
-  restrictivo). Se relee al operar, permitiendo rotación sin recompilar.
-- Se admite un salto de línea final; no hay longitud de token fija.
-- Las variables tienen que existir en el proceso servidor, no sólo en otra terminal.
-- `cloud-token`: sitio directo; `cloud-scoped-token`: `cloudId` UUID obligatorio y
-  gateway Atlassian derivado internamente. Ambos usan Basic email:token.
-- Una cuenta con secreto ausente no impide registrar herramientas ni usar las demás.
-- `connection_test` comprueba `/myself`; no prueba acceso a proyectos o JSM.
+```bash
+issuekeeper-jira check --global
+issuekeeper-jira uninstall --global
+```
 
-Los permisos del host siguen importando: otras herramientas con acceso al archivo
-o al entorno podrían leerlo. Este plugin no proporciona un sandbox del servidor.
+Si se ejecutó desde el repositorio, usar `node packages/opencode-jira/dist/cli.js`
+en lugar del nombre del binario. No se usa `sudo`, `npm install -g`, ni postinstall.
+No se añade el binario al PATH del sistema: para un tarball, volver a usar
+`npm exec --package=/ruta/paquete.tgz -- issuekeeper-jira check --global`
+o el mismo prefijo con `uninstall --global`.
 
-## Herramientas registradas
+### Archivos administrados
 
-| Nombre efectivo | Entrada |
+- Configuración: `$XDG_CONFIG_HOME/opencode`, o `~/.config/opencode`.
+- Datos: `$XDG_DATA_HOME/issuekeeper/opencode-jira`, o
+  `~/.local/share/issuekeeper/opencode-jira`.
+- Copias inmutables por hash en `copies/<sha256>/node_modules/@issuekeeper/opencode-jira`;
+  la configuración apunta a una copia completa, nunca a una instalación en curso.
+- `instructions/jira.md`, una referencia efectiva en `instructions` y un ejemplo
+  **inactivo** `account.example.jsonc`. El ejemplo no se registra como instrucciones.
+- Manifiesto y respaldos privados; sin perfiles ni secretos en el manifiesto.
+
+Conserva comentarios JSONC, cuentas, opciones ajenas y orden de permisos.
+Si existen ambos archivos de configuración, claves duplicadas, otra vía de carga,
+symlinks o un archivo homónimo desconocido, **se detiene para revisión manual**.
+No relaja reglas existentes: si una acción ya está cubierta, no añade una regla
+posterior que anule su `deny`/`ask`. Las reglas de agentes y políticas administradas
+no se modifican.
+
+Las instrucciones personalizadas se conservan y se deja una copia `.new-<hash>`.
+Restaurar un archivo o una referencia retirados requiere aceptación explícita.
+El progreso permite reanudar una interrupción; un bloqueo de un proceso aún vivo
+no se elimina. Una segunda instalación idéntica no reescribe archivos.
+La retirada conserva paquetes, respaldos, permisos y personalizaciones; exporta
+privadamente las opciones de cuenta antes de retirar su referencia. No revoca tokens.
+
+`check` es de sólo lectura: salida 0 correcta, 1 inconsistente, 2 sin instalación.
+No prueba Jira, carga efectiva de OpenCode, modelos, ni políticas de otras capas.
+OpenCode recarga la configuración al guardar; `/reload` permite forzar la recarga.
+
+Alternativa manual: integrar [opencode.example.jsonc](./opencode.example.jsonc)
+sin reemplazar la configuración existente y registrar
+[templates/jira.md](./templates/jira.md) según la sección 9.4 de la especificación.
+
+## Cuentas y secretos
+
+`accounts: []` es válido y registra las ocho herramientas sin red ni permisos.
+`jira_accounts_list` devuelve `[]` con indicaciones; las demás herramientas
+devuelven `ACCOUNT_UNAVAILABLE` antes de acceder a Jira o pedir permisos remotos.
+
+- Alias explícito en cada operación; `defaultAccount` sólo puede ser un alias existente.
+- `restrictedProjects: []` por defecto: bloquea los proyectos enumerados, no permite
+  únicamente esos proyectos. Se verifica siempre el proyecto **real**, no el prefijo.
+- `restrictedUpdateFields: []` se valida, pero no restringe lecturas en esta fase.
+- Las antiguas opciones `allowedProjects`, `allowedReadFields` y
+  `allowedUpdateFields` se rechazan.
+- Una sola fuente: `tokenFile` absoluto, regular, sin symlink final, del usuario y
+  modo 0600 o más restrictivo; o el **nombre** de `tokenEnv` en el proceso servidor.
+- La credencial se relee por operación para permitir rotación sin reinicio.
+  Se admite un salto de línea final; nunca se pide el token en el chat.
+- `cloud-token`: sitio HTTPS `*.atlassian.net`. `cloud-scoped-token`: gateway
+  Atlassian con UUID `cloudId`; la conexión compara primero el tenant sin credenciales.
+- Ambos usan Basic email:token. Un 401 o credencial inválida sólo afecta al alias.
+- `tokenFile` no está soportado en Windows: `ACCOUNT_UNAVAILABLE`.
+
+## Herramientas
+
+| Nombre efectivo | Argumentos |
 | --- | --- |
 | `jira_accounts_list` | `{}` |
 | `jira_connection_test` | `account` |
+| `jira_issues_search` | `account`, `jql`, `fields?`, `maxResults?`, `cursor?` |
 | `jira_issue_get` | `account`, `issueKey`, `fields?` |
-| `jira_issues_search` | `account`, `project`, filtros opcionales, `fields?`, `maxResults?`, `cursor?` |
 | `jira_comments_list` | `account`, `issueKey`, `audience?`, `maxResults?`, `cursor?` |
+| `jira_mention_candidates` | `account`, `issueKey`, `audience`, `query` o `accountId`, `visibility?`, `maxResults?`, `cursor?` |
 | `jira_attachments_list` | `account`, `issueKey`, `maxResults?`, `cursor?` |
 | `jira_attachment_download` | `account`, `issueKey`, `attachmentId`, `destinationName?` |
 
-Todos los alias son explícitos. No existe una cuenta activa global ni se prueban
-códigos en otros perfiles. Los resultados llevan `ok`, `account` (operaciones de
-cuenta), `data`/`error`, advertencias y `meta.requestId`, `truncated`,
-`untrustedContent`. Los errores no incluyen cuerpos remotos, secretos o headers.
-Los rechazos de permisos de OpenCode se propagan como fallos nativos.
+Los argumentos son estrictos. No admiten ubicaciones, URLs, cabeceras ni métodos.
+Todas las herramientas verifican la sesión y su ubicación canónica desde el
+servidor antes de permisos/red. Los rechazos y cancelaciones de OpenCode se
+propagan nativamente; los errores de aplicación incluyen `warnings`, `fieldErrors`
+cuando proceda, y `meta`. `TIMEOUT` sólo corresponde al temporizador interno.
+Una línea JSON en stderr correlaciona `requestId`, herramienta, alias, operación,
+último estado HTTP, intentos y duración. No registra cuerpos, cabeceras ni URLs.
 
-### Búsqueda y campos
+### JQL y minimización
 
 ```json
-{
-  "account": "trabajo",
-  "project": "IK",
-  "assignee": "me",
-  "statusCategory": "notDone",
-  "updatedSince": "2026-11-01",
-  "maxResults": 25
-}
+{"account":"trabajo","jql":"project = IK AND statusCategory != Done ORDER BY updated DESC","maxResults":25}
 ```
 
-Se genera JQL acotado y se usa exclusivamente `POST /rest/api/3/search/jql`.
-**No se acepta `jql` libre**: se evita un parser incompleto que pudiera eludir
-`allowedProjects`. `assignee`: `me`/`unassigned`; `statusCategory`:
-`notDone`/`To Do`/`In Progress`/`Done`; `updatedSince`: `YYYY-MM-DD`.
-El orden es `updated DESC, key ASC`. Se entrega una página, sin prometer `total`.
-Al pasar cursor, repite cuenta, filtros, campos y tamaño. El cursor opaco está
-ligado a esa consulta, caduca en diez minutos y se pierde al descargar el plugin.
-Hay un límite de 100 páginas por cadena y 1000 cursores en memoria.
+JQL es la única modalidad. El analizador acotado admite comparaciones, funciones,
+listas, paréntesis, AND/OR/NOT y ORDER BY. Rechaza sintaxis desconocida y consultas
+sin una cláusula conjuntiva útil de proyecto, asignado o fechas. Por ejemplo,
+`assignee = currentUser() OR updated > -1d` requiere acotar más.
+Con restricciones envuelve toda la condición y añade `project NOT IN (...)`
+antes del orden. Un resultado restringido se omite con advertencia, sin sus datos.
 
-`allowedReadFields` permite configurar una allowlist (IDs API, no etiquetas):
-campos estándar de la lista siguiente o `customfield_<número>`. No admite campos
-embebidos de comentarios, adjuntos o historial que eviten sus operaciones específicas.
-Por defecto: `summary`, `description`, `status`, `assignee`, `reporter`, `project`,
-`updated`, `labels`, `priority`, `issuetype`. Los campos de estructura/política
-`project`, `updated`, `summary`, `status` se solicitan siempre. Los personalizados
-sólo se devuelven si figuran en la allowlist y selección efectiva. No se pide
-historial ni correos/avatares de usuarios por defecto. El contenido de campos
-personalizados puede contener datos personales: administra su allowlist.
+Una página, sin total inventado; cursor opaco de diez minutos, 100 páginas por
+cadena y 1000 cursores. Repetir cuenta, JQL, campos y tamaño al continuar.
+Búsqueda mínima: summary, status, assignee, project, updated, labels.
+Campos personalizados explícitos sin lista configurada; se rechazan `*all`,
+`comment`, `attachment` y `worklog`. Se piden siempre project/updated/summary/status.
+Usuarios sin emails/avatares; campos personalizados saneados recursivamente.
+ADF conserva identidades de menciones y separadores, con avisos por pérdida o
+complejidad. El truncamiento es explícito y nunca rompe el JSON.
 
-Se valida el proyecto **real** de cada respuesta, incluidas claves movidas. La vista
-ADF conserva separadores básicos y advierte de nodos no soportados; no es una
-conversión reversible. El presupuesto de texto se aplica a la salida sin romper
-JSON; salidas estructurales excesivas se rechazan, no se cortan como texto JSON.
+### JSM y personas
 
-### JSM: agentes y clientes
+Los tickets software/business siguen usando Platform aunque el perfil active JSM.
+Un service desk sin solicitud accesible no recurre a Platform para eludir audiencia.
+El portal devuelve `source: "jsm-request"` sin inventar `updated` ni `status.id`;
+Platform conserva ambos obligatorios.
 
-Activa `serviceManagement.enabled` por perfil. Se consulta la solicitud real;
-en JSM, los comentarios se leen sólo mediante `/rest/servicedeskapi`, con filtros
-`public`/`internal` y paginación `start`/`limit`. Cada comentario conserva su audiencia.
-No se recurre a Platform si falla el acceso JSM. Un cliente puede recibir una
-lista vacía de notas internas: no demuestra que no existan.
+Comentarios JSM: audiencia internal/public por comentario. Sus menciones de texto
+todavía no tienen codificación verificada; se advierte sin inferir identidades.
+Adjuntos JSM: `unknown` si la API no declara audiencia.
 
-Si Platform devuelve 403/404 pero el portal permite leer la solicitud, se comprueba
-el proyecto mediante `expand=serviceDesk` (ID/proyecto reales). Se devuelve
-`source: "jsm-request"`, sin inventar `updated` o ID de estado. Si esa expansión no
-está disponible, se falla de forma segura. La búsqueda sigue requiriendo acceso
-Jira Platform; tener acceso al portal no implica poder ejecutar JQL ni `/myself`.
+Los candidatos usan búsqueda contextual, nunca un directorio global; público
+recorre informador, Platform y participantes en páginas por origen. Se mantienen
+homónimos e identidades, no emails. `query`: 2–100 caracteres; `accountId` excluyente.
+`visibility: {type: "role"|"group", value}` sólo para ticket. Interno o visibilidad
+restringida se marca `unverified`; `validated` sólo acredita el origen contextual,
+**no autoriza una publicación**. Una identidad puede repetirse entre páginas de
+orígenes distintos: deduplicar por `accountId`. Un vacío no prueba inexistencia.
 
-Un perfil habilitado para JSM que no pueda confirmar la solicitud **no** lista
-comentarios/adjuntos vía Platform como alternativa. Para tickets ordinarios usa
-un perfil Platform explícito (`serviceManagement.enabled: false`). En el listado
-JSM de adjuntos, la API no declara audiencia: se devuelve `unknown`, no una
-deducción por nombre o identidad. Los enlaces recibidos nunca se siguen; sólo se
-extrae el ID de metadata validada.
+### Permisos y descargas
 
-### Descarga segura
-
-- Se lista y verifica pertenencia cuenta/ticket antes de descargar el ID.
-- Requiere `jira.read`, `jira.download` y `edit` para directorios, temporal y destino.
-  Las rutas se fijan dentro de la ubicación del plugin; no se permiten destinos
-  externos ni parámetros que amplíen raíces. Si la sesión cambia de ubicación
-  durante la autorización, se rechaza la transferencia.
-- **Linux con `/proc/self/fd`**: apertura de la jerarquía con descriptores y
-  `O_NOFOLLOW`, directorios privados `0700`, temporal exclusivo `0600`, publicación
-  por hard link sin sobrescritura, tamaño y SHA-256 durante streaming.
-- No acepta symlinks en la jerarquía. Un directorio de descarga preexistente y sus
-  padres bajo la ubicación deben ser del usuario y privados. No cambia sus modos
-  automáticamente ni borra archivos existentes. Usa un filesystem que admita hard links.
-  La ubicación debe pertenecer al usuario, sin escritura de grupo/otros; los
-  ancestros deben pertenecer al usuario o root. El despliegue debe impedir que
-  usuarios no confiables renombren esa jerarquía desde directorios superiores compartidos.
-- `downloadDir` predetermina `.issuekeeper/downloads`, siempre dentro de la ubicación
-  del servidor y fuera de secretos/metadatos. La ruta del recibo es relativa a ella.
-  Los nombres remotos se sanean; un nombre explícito no puede ser una ruta.
-- Máximo por fichero 20 MiB y timeout 120 s por defecto, también con límite real
-  del stream. Tamaño distinto de la metadata implica fallo y limpieza del temporal.
-- Platform usa `redirect=false`. **Todas las redirecciones se rechazan**, también
-  las 303 de JSM: no hay aún allowlist administrada de medios. Si el tenant exige
-  un enlace firmado, la descarga devuelve un error seguro, sin cambiar de API,
-  reenviar credenciales o devolver esa URL al modelo.
-- No se abre, ejecuta, descomprime ni añade el contenido al modelo. Las descargas
-  completadas permanecen en el servidor; su eliminación es una acción separada.
-
-`.issuekeeper/` está excluido de Git en este repositorio. En otros proyectos,
-exclúyelo igualmente de Git y de mecanismos de incorporación automática al contexto.
-El aislamiento frente a procesos maliciosos del mismo UID exige separación del host;
-los permisos `0700` no sustituyen ese aislamiento.
-
-## Configuración y límites
-
-[options.schema.json](./options.schema.json) se genera desde los validadores con
-`npm run build`. El parser runtime es la autoridad, incluidas restricciones entre
-campos que JSON Schema no representa. Rechaza claves desconocidas, alias repetidos,
-cuenta predeterminada inexistente, orígenes no Cloud/HTTPS, fuentes ambiguas y
-límites no acotados. No se hacen llamadas Jira dentro de transforms.
-
-| Grupo | Valores predeterminados |
+| Acción | Recurso |
 | --- | --- |
-| Cuenta | `readOnly: true`, JSM deshabilitado, `allowedUpdateFields: []` |
-| HTTP | 20 s total incluida cola/backoff; 3 intentos; 1 MiB JSON; 3 concurrentes por sitio |
-| Salida | 25 elementos, máximo 100, 12000 caracteres de texto |
-| Adjuntos | habilitados, 20 MiB por fichero, timeout 120 s, sin sobrescritura |
+| `jira.accounts` | `*` |
+| `jira.read` | `alias/connection`, `alias/search`, `alias/issue/KEY` |
+| `jira.read` (candidatos) | `alias/issue/KEY/mentions/audience`, además de la lectura del ticket |
+| `jira.download` | `alias/issue/KEY/attachment/ID/ruta-relativa` |
+| `edit` | destino y temporal relativos; `save` sólo contiene el destino |
 
-Se comparten colas entre perfiles del mismo sitio. Sólo lecturas transitorias se
-reintentan con backoff y `Retry-After`; no se reintentan 400/401/403/404 ni descargas
-binarias. La cancelación y descarga del plugin abortan trabajo pendiente.
-Las opciones `changes` y de carga se validan para aceptar la configuración de la
-guía, pero **no activan escritura ni staging**. No hay auditoría persistente de
-propuestas ni recibos de escritura en esta fase; se devuelve correlación por petición.
+También se autoriza la clave canónica si difiere. La sesión se vuelve a validar
+tras la aprobación de descarga. Nunca se permiten raíces externas, por lo que no
+es necesaria una aprobación `external_directory`.
 
-## Pruebas
+Se verifica pertenencia por listado y metadata Platform antes del contenido.
+Linux `/proc/self/fd`, recorrido con descriptores/O_NOFOLLOW, directorios privados,
+temporal exclusivo 0600, streaming con tamaño/SHA-256, publicación sin sobrescribir
+y limpieza sólo del temporal propio. El recibo incluye sitio, vía, nombre remoto,
+MIME, audiencia y ruta relativa del servidor. No abre ni entrega bytes al modelo.
+`downloadDir` y `uploadRoots` deben estar dentro de la ubicación, fuera de secretos.
 
-La campaña manual desde cero está descrita en el [plan de pruebas de fase 1](../../doc/plan-pruebas-manuales-fase-1.md): alta de Jira/JSM, identidades, fixtures, instalación y casos con evidencias y criterios de aceptación.
+Platform pide `redirect=false`. Se rechaza **todo 3xx**, JSON o binario, con
+`REDIRECT_NOT_ALLOWED` no reintentable. No hay destinos de medios observados y
+autorizados; una instalación que necesite 303 **no queda validada funcionalmente**.
+Nunca se sigue ni se muestra la URL firmada.
 
-`npm test` usa transporte simulado, dos perfiles y escenarios agente/cliente. No
-contacta Jira ni modifica el servicio OpenCode. Incluye contratos de permisos V2,
-cursores, URLs, secretos/rotación, ADF, respuestas inválidas, límites, redirecciones,
-cancelación, concurrencia, pertenencia, symlinks, descargas parciales y no sobrescritura.
-El workflow CI declara Node 22 y 24; que exista la matriz no afirma que ya haya corrido.
-`npm run test:pack` instala el tarball en un directorio temporal aislado y prueba
-su export y registro V2 sin conectar a Jira; elimina sólo ese directorio al terminar.
+## Límites y decisiones
 
-La integración real está **omitida por defecto**. Para ejecutarla, prepara una
-solicitud de pruebas accesible por dos identidades (agente/cliente), con comentario
-y adjunto internos y otros públicos ya existentes. El test sólo los lee:
+Predeterminados compartidos en `src/defaults.ts`: 20 s HTTP, 3 intentos, 1 MiB JSON,
+3 concurrentes por alias y un tope compartido de **3 por sitio** (ambos toman
+`maxConcurrentPerAccount`); el backoff libera ambos permisos. Salida 25/100 y
+12000 caracteres; adjuntos 20 MiB, 120 s, `overwrite: false` como único valor.
+Binarios sin reintentos. `changes` y opciones de carga no activan escritura.
+
+Decisiones D-01…D-16: JQL único; sin destinos de medios; concurrencia alias+sitio;
+unión de ticket por source; proveedor con cuenta resuelta/callback y recibo de
+descarga tipado; query/accountId excluyentes y validación contextual; diagnóstico stderr
+porque el SDK 2.2.5 no ofrece logger en su Context; cancelación nativa; códigos
+CURSOR_INVALID/INVALID_RESPONSE/REDIRECT_NOT_ALLOWED documentados; recursos de la
+tabla; omisión avisada de resultados restringidos; projectTypeKey para Platform;
+GET JSM servicedesk de bajo coste; tokenFile Windows no soportado; overwrite sólo
+false; comandos sincronizados con 9.3.
+
+## Pruebas y pendientes
 
 ```bash
-export ISSUEKEEPER_LIVE_READS=1
-export ISSUEKEEPER_LIVE_CONFIG=/ruta/privada/options.json
-export ISSUEKEEPER_LIVE_FIXTURE='{"agent":"trabajo","customer":"cliente","issueKey":"IK-123","internalCommentId":"1001","internalAttachmentId":"1002","publicCommentId":"1003","publicAttachmentId":"1004"}'
-npm test -- test/integration/live-read.test.ts
+npm run typecheck
+npm run test:mock
+npm run test:pack
+npm run build
+node scripts/versions.mjs
 ```
 
-`options.json` contiene sólo las opciones del plugin y referencias a secretos, no
-el objeto OpenCode completo; no se versiona. Se exige llegar al final del listado
-(máximo 20 páginas) y comprobar los IDs conocidos, no sólo que una lista sea vacía.
-No habilites estas variables en CI de PRs no confiables.
+Informes separados en `reports/mock/` y `reports/live/`, excluidos de Git y del
+tarball. CI declara Node 22/24, vigencia del esquema, artefactos y job aislado del
+instalador. La matriz declarada no es evidencia de su ejecución.
 
-Antes de considerar validada una instalación: probar carga real y `/reload`, dos
-cuentas, rechazo de lectura/descarga, una descarga y su hash, y consultas con dos
-modelos con tool calling. Esas pruebas requieren entorno y autorización del usuario;
-los mocks no las sustituyen.
+Para integración real, preparar fuera del repositorio opciones e inventario con
+el contrato de `test/integration/inventory-read.test.ts`, dos sitios y ambas
+modalidades de token:
 
-## Compatibilidad y seguridad de dependencias
+```bash
+ISSUEKEEPER_LIVE_READS=1 \
+ISSUEKEEPER_LIVE_DOWNLOADS=1 \
+ISSUEKEEPER_LIVE_CONFIG=/ruta/privada/options.json \
+ISSUEKEEPER_LIVE_INVENTORY=/ruta/privada/inventory.json npm run test:live
+```
 
-Base comprobable: SDK fijado `@opencode/plugin@2.2.5`, TypeScript `5.9.3`, Zod
-`4.6.7`, Vitest `4.1.12`, Node 22 (desarrollo local: 22.23.2). Se comprueba el contrato
-`Plugin.define`, registro `ctx.tool.transform` y permisos contra esos tipos.
-No se declara compatibilidad con cualquier versión V2 ni se fija proveedor de IA.
+Permisos instrumentados del SDK, no una demostración de su política en servidor.
+El workflow manual requiere configurar y proteger el entorno `jira-integration`
+y sus secretos; nunca se activa desde pull requests ni forks.
 
-La auditoría npm mantiene avisos **moderados** transitivos del SDK (`glob`,
-`minimatch` y dependientes), sin corrección compatible ofrecida por npm. No se
-fuerzan overrides mayores sin validar el SDK. Revisar `npm audit` antes de desplegar;
-no se afirma una cadena de suministro libre de vulnerabilidades.
+Controlador local sin Jira: `npm run build` y
+`node scripts/lab.mjs HT-01`…`HT-08`. Variantes: HT-02 código HTTP;
+HT-03 `cancel`; HT-04 `redirect`/`large`; HT-05 `restricted`; HT-06 `redirect`.
+Usa identidades ficticias y transporte inyectado; no equivale a observación real.
 
-Uso interno/personal; `private: true` evita publicación accidental. No se ha
-elegido licencia de distribución. La recogida de API tokens para apps cloud de
-terceros requiere revisar las condiciones Atlassian y una arquitectura OAuth/Forge.
+Pendientes de validación: campaña manual, dos proyectos/modelos y políticas reales,
+ambas identidades JSM, scopes, cabecera Accept binaria y destinos de medios;
+rotación real de token; campaña completa de disco lleno/fallos de escritura y
+hostilidades del filesystem. No hay barrido de temporales huérfanos ni cuota
+de disco (ADJ-04), ni división completa de cloud.ts (ARQ-05).
+El instalador no verifica todos los archivos transitivos contra un inventario de
+integridad; conflictos complejos de migración requieren revisión manual.
+
+Excluir `.issuekeeper/` de Git y del contexto en otros proyectos. Los permisos
+0700 no aíslan procesos maliciosos del mismo UID: se requiere separación del host.
+Dependencias fijadas: SDK 2.2.5, Zod 4.6.7, jsonc-parser 3.3.1. npm audit mantiene
+21 avisos moderados transitivos; no se fuerzan actualizaciones incompatibles.
+Uso interno, sin publicación ni licencia de distribución elegida.

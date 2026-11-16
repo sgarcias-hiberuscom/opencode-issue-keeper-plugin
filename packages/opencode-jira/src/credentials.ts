@@ -7,11 +7,11 @@ export async function authorization(account: Account, env = process.env): Promis
   let token: string | undefined;
   try {
     if (account.auth.tokenFile) {
+      if (process.platform === "win32") throw new Error();
       const file = await open(account.auth.tokenFile, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const stat = await file.stat();
-        if (!stat.isFile() || stat.size > 16384 || (process.platform !== "win32"
-          && ((stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()))) throw new Error();
+        if (!stat.isFile() || stat.size > 16384 || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()) throw new Error();
         const bytes = Buffer.alloc(16385);
         const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
         if (bytesRead > 16384) throw new Error();

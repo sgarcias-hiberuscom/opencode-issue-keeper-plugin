@@ -89,9 +89,9 @@ export async function saveDownload(
     await link(temp, destination);
     return { path: relative(location, join(plan.directory, plan.filename)), size, sha256: hash.digest("hex") };
   } catch (error) {
+    if (signal.aborted) throw signal.reason;
     if (error instanceof IssueKeeperError) throw error;
     if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new IssueKeeperError("FILE_ACCESS_DENIED", "El destino ya existe; elija otro nombre. No se ha sobrescrito.");
-    if (signal.aborted) throw new IssueKeeperError("CANCELLED", "Descarga cancelada.");
     throw new IssueKeeperError("TRANSFER_INCOMPLETE", "No se pudo completar la descarga; revise espacio y permisos locales.");
   } finally {
     signal.removeEventListener("abort", abort);
