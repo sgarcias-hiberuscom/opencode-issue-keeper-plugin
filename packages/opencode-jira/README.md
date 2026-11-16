@@ -4,6 +4,26 @@ Plugin de **servidor OpenCode V2**, privado y de sólo lectura remota. No regist
 preparación/aplicación de cambios, comentarios nuevos, cargas ni transiciones.
 La descarga escribe únicamente en el disco del servidor, con permisos explícitos.
 
+## Alcance de la implementación
+
+El paquete ofrece las siete herramientas de lectura y descarga del
+[catálogo registrado](#herramientas-registradas), configuración de ejemplo,
+esquema de opciones, comandos de consulta y pruebas simuladas multicuenta/JSM.
+La búsqueda utiliza filtros estructurados, no JQL libre; la descarga segura
+requiere Linux y rechaza redirecciones a medios no validados.
+
+La resolución de candidatos mediante `jira_mention_candidates`, la publicación
+de menciones, los comentarios enriquecidos y el instalador global no forman
+parte de las capacidades disponibles descritas en este README. El
+[plan de desarrollo](../../doc/plugin-jira-opencode.md#12-plan-de-desarrollo)
+define sus requisitos y condiciones de cierre; disponer de este paquete no
+acredita haber completado esa fase del plan.
+
+La validación real con Jira, identidades agente/cliente y modelos requiere
+un entorno autorizado y evidencias de ejecución. Las pruebas simuladas no
+sustituyen esa comprobación; véanse [Pruebas](#pruebas) y las instrucciones
+de integración real de este README.
+
 ## Instalación local
 
 Desde la raíz de IssueKeeper:
