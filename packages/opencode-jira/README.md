@@ -9,6 +9,12 @@ véase [estado y trazabilidad](../../validation/phase-1.md).
 
 Requiere Node >=22, npm y `tar`; la descarga segura requiere Linux.
 
+La copia administrada contiene solo la parte de servidor y mantiene el SDK
+`@opencode/plugin` 2.2.5. La instalación usa `--legacy-peer-deps` para no resolver
+los peers opcionales de TUI/GUI del SDK (Electron, Vite, etc.). No sustituye sus
+dependencias normales: se comprueban el árbol instalado contra su lock y la
+carga de las ocho herramientas sin esos peers de interfaz.
+
 ```bash
 npm --prefix packages/opencode-jira ci
 npm --prefix packages/opencode-jira run build
@@ -18,7 +24,7 @@ npm --prefix packages/opencode-jira run install:global
 Desde un tarball ya construido:
 
 ```bash
-npm exec --package=/ruta/issuekeeper-opencode-jira-0.1.0.tgz -- issuekeeper-jira install --global --source /ruta/issuekeeper-opencode-jira-0.1.0.tgz
+npm exec --legacy-peer-deps --package=/ruta/issuekeeper-opencode-jira-0.1.0.tgz -- issuekeeper-jira install --global --source /ruta/issuekeeper-opencode-jira-0.1.0.tgz
 ```
 
 El instalador muestra el plan y requiere aceptación en una terminal interactiva.
@@ -33,7 +39,7 @@ issuekeeper-jira uninstall --global
 Si se ejecutó desde el repositorio, usar `node packages/opencode-jira/dist/cli.js`
 en lugar del nombre del binario. No se usa `sudo`, `npm install -g`, ni postinstall.
 No se añade el binario al PATH del sistema: para un tarball, volver a usar
-`npm exec --package=/ruta/paquete.tgz -- issuekeeper-jira check --global`
+`npm exec --legacy-peer-deps --package=/ruta/paquete.tgz -- issuekeeper-jira check --global`
 o el mismo prefijo con `uninstall --global`.
 
 ### Archivos administrados
@@ -154,6 +160,10 @@ orígenes distintos: deduplicar por `accountId`. Un vacío no prueba inexistenci
 
 ### Permisos y descargas
 
+Las fichas de las herramientas paginadas publican el máximo efectivo de
+`output.maxPageSize`; si no se solicita un tamaño concreto, puede omitirse
+`maxResults` para utilizar el predeterminado de la instalación.
+
 | Acción | Recurso |
 | --- | --- |
 | `jira.accounts` | `*` |
@@ -173,10 +183,12 @@ y limpieza sólo del temporal propio. El recibo incluye sitio, vía, nombre remo
 MIME, audiencia y ruta relativa del servidor. No abre ni entrega bytes al modelo.
 `downloadDir` y `uploadRoots` deben estar dentro de la ubicación, fuera de secretos.
 
-Platform pide `redirect=false`. Se rechaza **todo 3xx**, JSON o binario, con
-`REDIRECT_NOT_ALLOWED` no reintentable. No hay destinos de medios observados y
-autorizados; una instalación que necesite 303 **no queda validada funcionalmente**.
-Nunca se sigue ni se muestra la URL firmada.
+Platform pide `redirect=false` y la transferencia acepta cualquier MIME binario.
+JSON rechaza todo 3xx. Una descarga admite un único salto HTTPS al origen exacto
+`https://api.media.atlassian.com`, ruta `/file/<uuid>/binary`, sin usuario,
+contraseña, puerto alternativo ni fragmento. Se omiten credenciales y cookies
+en medios; otro salto se rechaza con `REDIRECT_NOT_ALLOWED`. Nunca se muestra
+la URL firmada. La compatibilidad funcional de cada sitio se valida aparte.
 
 ## Límites y decisiones
 
@@ -186,7 +198,7 @@ Predeterminados compartidos en `src/defaults.ts`: 20 s HTTP, 3 intentos, 1 MiB J
 12000 caracteres; adjuntos 20 MiB, 120 s, `overwrite: false` como único valor.
 Binarios sin reintentos. `changes` y opciones de carga no activan escritura.
 
-Decisiones D-01…D-16: JQL único; sin destinos de medios; concurrencia alias+sitio;
+Decisiones D-01…D-16: JQL único; destino de medios explícito y acotado; concurrencia alias+sitio;
 unión de ticket por source; proveedor con cuenta resuelta/callback y recibo de
 descarga tipado; query/accountId excluyentes y validación contextual; diagnóstico stderr
 porque el SDK 2.2.5 no ofrece logger en su Context; cancelación nativa; códigos
@@ -229,10 +241,20 @@ Controlador local sin Jira: `npm run build` y
 HT-03 `cancel`; HT-04 `redirect`/`large`; HT-05 `restricted`; HT-06 `redirect`.
 Usa identidades ficticias y transporte inyectado; no equivale a observación real.
 
-Pendientes de validación: campaña manual, dos proyectos/modelos y políticas reales,
-ambas identidades JSM, scopes, cabecera Accept binaria y destinos de medios;
-rotación real de token; campaña completa de disco lleno/fallos de escritura y
-hostilidades del filesystem. No hay barrido de temporales huérfanos ni cuota
+Controlador ampliado, también sin red ni credenciales reales:
+`node scripts/lab-closure.mjs HT-01`…`HT-08`. Admite además `BU-04`, `PE-06`
+y `DE-06`…`DE-08`. Registra variantes y comprobaciones observables: espera,
+colas, validación de medios, permisos previos, cancelación tras recibir bytes,
+cambio de ubicación y almacenamiento simulado. Los errores ENOSPC/EIO se inyectan
+solo en descriptores del directorio privado del caso; no se llena el disco.
+Cada ejecución tiene presupuesto de 30 segundos y conserva el aislamiento de
+las evidencias LOCAL/LAB respecto de Jira real.
+
+El cierre requiere el informe privado de campaña, no solo pruebas automatizadas:
+dos proyectos/modelos, políticas reales, ambas identidades JSM, scopes, hashes,
+rotación real de token y todas las variantes obligatorias. El laboratorio sintético
+no sustituye esas evidencias ni demuestra resistencia exhaustiva a procesos
+hostiles del mismo UID. No hay barrido de temporales huérfanos ni cuota
 de disco (ADJ-04), ni división completa de cloud.ts (ARQ-05).
 El instalador no verifica todos los archivos transitivos contra un inventario de
 integridad; conflictos complejos de migración requieren revisión manual.

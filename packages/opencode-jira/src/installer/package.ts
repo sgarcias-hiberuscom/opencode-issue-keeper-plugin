@@ -89,7 +89,8 @@ export async function preparePackage(source: string, data: string) {
     await privateDirectory(staging);
     await writeFile(join(staging, "package.json"), JSON.stringify({ name: "issuekeeper-jira-installation", private: true, type: "module" }), { mode: 0o600, flag: "wx" });
     await writeFile(join(staging, "source.tgz"), await readFile(archive), { mode: 0o600, flag: "wx" });
-    await exec("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", "./source.tgz"], { cwd: staging, maxBuffer: 8 * 1024 * 1024 });
+    // The server SDK's optional UI peers belong to the host, not this isolated backend copy.
+    await exec("npm", ["install", "--ignore-scripts", "--legacy-peer-deps", "--no-audit", "--no-fund", "--save-exact", "./source.tgz"], { cwd: staging, maxBuffer: 8 * 1024 * 1024, timeout: 90000 });
     await validatePackage(join(staging, "node_modules", packageName), own.version);
     for (const dependency of ["@opencode/plugin", "zod", "jsonc-parser"]) {
       if (await readOptional(join(staging, "node_modules", dependency, "package.json")) === undefined) throw new Error("Dependencias incompletas.");

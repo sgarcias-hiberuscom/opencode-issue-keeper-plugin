@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { open, readdir, unlink, lstat } from "node:fs/promises";
 import { join, matchesGlob, resolve } from "node:path";
 import { z } from "zod";
@@ -81,6 +81,16 @@ async function withLock<T>(paths: InstallerPaths, run: () => Promise<T>): Promis
   await privateDirectory(paths.data);
   const lockPath = join(paths.data, "installer.lock");
   let lock;
+  // A zombie holder is dead: without a reaping init (minimal containers) kill(pid, 0)
+  // still succeeds for it and would block recovery forever.
+  function isZombie(pid: number): boolean {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2).charAt(0);
+      return state === "Z";
+    }
+    catch { return false; }
+  }
   async function acquire() {
     const handle = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     await handle.writeFile(JSON.stringify({ owner: "issuekeeper-jira", pid: process.pid }));
@@ -92,9 +102,11 @@ async function withLock<T>(paths: InstallerPaths, run: () => Promise<T>): Promis
     const info = content ? z.strictObject({ owner: z.literal("issuekeeper-jira"), pid: z.number().int().positive() }).safeParse(JSON.parse(content)) : undefined;
     const stat = await lstat(lockPath);
     if (!info?.success || stat.uid !== process.getuid?.()) throw new Error("Bloqueo de origen desconocido; revise installer.lock manualmente.");
+    let alive = true;
     try { process.kill(info.data.pid, 0); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH" && await readOptional(lockPath) === content) {
+    catch (error) { alive = (error as NodeJS.ErrnoException).code !== "ESRCH"; }
+    if (!alive || isZombie(info.data.pid)) {
+      if (await readOptional(lockPath) === content) {
         await unlink(lockPath);
         lock = await acquire();
       }

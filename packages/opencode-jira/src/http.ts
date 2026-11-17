@@ -82,6 +82,15 @@ export async function readJson(response: Response, limit: number, signal: AbortS
   }
 }
 
+function mediaDestination(location: string | null): URL {
+  try {
+    const target = new URL(location ?? "");
+    if (target.origin === "https://api.media.atlassian.com" && !target.username && !target.password && !target.hash
+      && /^\/file\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/binary$/i.test(target.pathname)) return target;
+  } catch { /* Invalid remote locations must not appear in diagnostics. */ }
+  throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
+}
+
 export class HttpClient {
   private readonly shutdown = new AbortController();
   private readonly sites = new Map<string, Semaphore>();
@@ -151,7 +160,7 @@ export class HttpClient {
           const response = await this.fetcher(url, {
             method: search === undefined ? "GET" : "POST",
             headers: {
-              Authorization: auth, Accept: binary ? "application/octet-stream" : "application/json",
+              Authorization: auth, Accept: binary ? "*/*" : "application/json",
               ...(search === undefined ? {} : { "Content-Type": "application/json" }),
             },
             ...(search === undefined ? {} : { body: JSON.stringify(search) }),
@@ -160,7 +169,29 @@ export class HttpClient {
           if (operation) operation.status = response.status;
           if (response.status >= 300 && response.status < 400) {
             await response.body?.cancel();
-            throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
+            // Only binary transfers may hop, exactly once, to the validated
+            // media destination over HTTPS; credentials are never forwarded
+            // and the signed URL is never reported or logged.
+            if (!binary || ![301, 302, 303, 307, 308].includes(response.status)) {
+              throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
+            }
+            const target = mediaDestination(response.headers.get("location"));
+            if (operation) operation.attempts++;
+            const media = await this.fetcher(target, {
+              method: "GET", headers: { Accept: "*/*" }, credentials: "omit",
+              redirect: "manual", signal: combined,
+            });
+            if (operation) operation.status = media.status;
+            if (media.status >= 300 && media.status < 400) {
+              await media.body?.cancel();
+              throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
+            }
+            if (!media.ok) {
+              await media.body?.cancel();
+              throw new IssueKeeperError("TRANSFER_INCOMPLETE", "La transferencia no llegó al destino de medios autorizado.");
+            }
+            try { return await consume(media, combined); }
+            finally { await media.body?.cancel().catch(() => {}); }
           }
           if (!response.ok) {
             await response.body?.cancel();
