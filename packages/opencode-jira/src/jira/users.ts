@@ -72,8 +72,9 @@ export async function mentionCandidates(
       cursor: cursors.next(scope, next ? JSON.stringify(next) : undefined, previous),
     },
     warnings: [...warnings,
-      "Un resultado vacío no prueba que una persona no exista. Un candidato no autoriza una mención; se revalidará al preparar.",
+      "Un resultado vacío no prueba que una persona no exista. Un candidato no autoriza una mención. Esta fase solo consulta candidatos: no prepara propuestas ni publica comentarios.",
       "La ambigüedad se indica para esta página; no seleccione automáticamente una identidad entre páginas.",
+      ...(next ? ["Búsqueda incompleta (isLast=false): no ha identificado una persona única, aunque esta página tenga un solo candidato validated o informador. Continúe con el cursor o pida aclaración; no elija por origen o validación."] : []),
     ],
   };
 }

@@ -21,6 +21,46 @@ const calls: [string, Record<string, unknown>][] = [
   ["attachment_download", { account: "work", issueKey: "IK-1", attachmentId: "101" }],
 ];
 describe("[6.7][E00][CF-01] common read contract", () => {
+  it.each(calls.filter(([name]) => ["issues_search", "comments_list", "mention_candidates", "attachments_list"].includes(name)))("publishes and enforces the configured page limit for %s", async (name, args) => {
+    const c = config(); c.output.pageSize = 2; c.output.maxPageSize = 5;
+    const fetcher = mockFetch(() => { throw new Error("network prohibited"); });
+    const service = await createService(c, directory, fetcher);
+    try {
+      const h = await toolHarness(service);
+      expect(h.tools.get(name)!.input).toMatchObject({ properties: { maxResults: { minimum: 1, maximum: 5, description: expect.stringContaining("máximo 5") } } });
+      expect(h.tools.get(name)!.description).toContain("omitir maxResults");
+      expect(h.tools.get(name)!.description).toContain("predeterminado 2, máximo 5");
+      expect(await h.invoke(name, { ...args, maxResults: 6 })).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
+      expect(h.assert).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+    } finally { service.close(); }
+  });
+  it("preserves candidate identity refinements in the configured page schema", async () => {
+    const service = await createService(config(), directory);
+    try {
+      const h = await toolHarness(service);
+      const result = await h.invoke("mention_candidates", { account: "work", issueKey: "IK-1", audience: "ticket", query: "Ana", accountId: "person" });
+      expect(result).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
+      expect(h.assert).not.toHaveBeenCalled();
+    } finally { service.close(); }
+  });
+  it("keeps explicit stop rules in every tool description without replacing native denials", async () => {
+    const service = await createService(configEmpty(), directory);
+    try {
+      const h = await toolHarness(service);
+      expect(h.tools.size).toBe(8);
+      for (const tool of h.tools.values()) {
+        expect(tool.description).toContain("Permission denied");
+        expect(tool.description).toContain("sin más llamadas");
+        expect(tool.description).toContain("tampoco accounts_list ni connection_test");
+      }
+      expect(h.tools.get("issues_search")!.description).toContain("assignee = currentUser()");
+      expect(h.tools.get("issues_search")!.description).toContain("statusCategory != Done");
+      expect(h.tools.get("mention_candidates")!.description).toContain("public para pública JSM");
+      const denial = new Error("Permission denied: jira.accounts");
+      h.assert.mockRejectedValue(denial);
+      await expect(h.invoke("accounts_list", {})).rejects.toBe(denial);
+    } finally { service.close(); }
+  });
   it.each(["../outside", "/etc", ".git", ".ssh", "secrets"])("[CFG-06] rejects unsafe upload root %s", async (root) => {
     const c = config(); c.attachments.uploadRoots = [root];
     const fetcher = mockFetch(() => json(issue()));
@@ -164,6 +204,7 @@ describe("[5.6][E03][ME-01] contextual mention candidates", () => {
       expect(result.data.values.map((v) => v.accountId)).toEqual(["a", "b"]);
       expect(JSON.stringify(result)).not.toContain("private@example.com"); expect(JSON.stringify(result)).not.toContain("avatarUrls");
       expect(result.data.values.every((v) => v.validation === "validated")).toBe(true);
+      expect(result.warnings?.join(" ")).toContain("no prepara propuestas ni publica comentarios");
     } finally { provider.close(); }
   });
   it("[ME-02] validates restricted projects before consulting users", async () => {
@@ -205,6 +246,9 @@ describe("[5.6][E03][ME-01] contextual mention candidates", () => {
       const input = { account: "work", issueKey: "IK-1", query: "Customer", audience: "public" as const };
       const first = await provider.mentionCandidates(c.accounts[0]!, input, signal());
       expect(first.data.values[0]?.origins).toEqual(["reporter"]);
+      expect(first.data.isLast).toBe(false);
+      expect(first.warnings.join(" ")).toContain("no ha identificado una persona única");
+      expect(first.warnings.join(" ")).toContain("no elija por origen o validación");
       const second = await provider.mentionCandidates(c.accounts[0]!, { ...input, cursor: first.data.cursor }, signal());
       const third = await provider.mentionCandidates(c.accounts[0]!, { ...input, cursor: second.data.cursor }, signal());
       expect(third.data.values[0]).toMatchObject({ accountId: "participant", origins: ["participant"], validation: "validated" });

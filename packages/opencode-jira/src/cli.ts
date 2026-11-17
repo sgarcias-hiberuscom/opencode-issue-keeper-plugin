@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { IssueKeeperError } from "./errors.js";
 import { check, install, uninstall, type InstallerIO } from "./installer/index.js";
 
 export function parseArguments(args: string[]) {
@@ -42,6 +43,9 @@ export async function main(args = process.argv.slice(2), io: InstallerIO = {
     return 0;
   } catch (error) {
     if (error instanceof Error && error.constructor === Error && !("code" in error)) io.print(error.message);
+    // IssueKeeperError messages are designed to be user-safe (the tools return
+    // them as-is); other coded errors may embed paths or remote data, so stay silent.
+    if (error instanceof IssueKeeperError) io.print(error.message);
     io.print("Operación no completada. Revise argumentos, conflictos, permisos y progreso; no se muestran datos de configuración.");
     return 1;
   }

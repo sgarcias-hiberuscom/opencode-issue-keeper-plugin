@@ -22,7 +22,10 @@ export const RequestSchema = z.object({
   requestFieldValues: z.array(z.object({ fieldId: z.string(), value: z.unknown() })).optional(),
 });
 export const PlatformAttachment = z.object({
-  id: z.string().regex(/^[1-9][0-9]*$/), filename: z.string().min(1), size: z.number().int().nonnegative(), mimeType: z.string(),
+  // Jira returns the attachment id as a string when embedded in an issue and
+  // as a number from the attachment metadata endpoint.
+  id: z.union([z.string().regex(/^[1-9][0-9]*$/), z.number().int().positive().max(Number.MAX_SAFE_INTEGER).transform(String)]),
+  filename: z.string().min(1), size: z.number().int().nonnegative(), mimeType: z.string(),
   author: UserSchema.optional(), created: z.string().optional(),
 });
 export const JsmAttachment = PlatformAttachment.omit({ id: true }).extend({
