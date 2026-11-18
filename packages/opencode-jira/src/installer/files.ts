@@ -52,11 +52,15 @@ export async function atomicWrite(path: string, content: string, expected: strin
     finally { await file.close(); }
     if (await readOptional(path) !== expected) throw new Error("Edición concurrente detectada; repita la operación.");
     await rename(temporary, path);
+    const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY);
+    try { await directory.sync(); } finally { await directory.close(); }
   } finally { await unlink(temporary).catch(() => {}); }
 }
 export async function removeUnchanged(path: string, expectedHash: string): Promise<boolean> {
   const content = await readOptional(path);
   if (content === undefined || hash(content) !== expectedHash) return false;
   await unlink(path);
+  const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY);
+  try { await directory.sync(); } finally { await directory.close(); }
   return true;
 }

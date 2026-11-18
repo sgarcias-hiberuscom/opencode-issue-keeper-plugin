@@ -1,4 +1,4 @@
-name: Jira read plugin
+name: Jira protected plugin
 on:
   push:
     paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/jira-read.yml"]
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       live:
-        description: Ejecutar integración real autorizada
+        description: Ejecutar sólo lecturas y descargas reales autorizadas (nunca escrituras)
         type: boolean
         default: false
 permissions:
@@ -63,7 +63,7 @@ jobs:
           export NODE_OPTIONS="--import=$(pwd)/scripts/no-jira.mjs"
           npm run test:installer
           npm run test:pack
-  live:
+  live-read:
     if: github.event_name == 'workflow_dispatch' && inputs.live && github.event.repository.fork == false
     environment: jira-integration
     runs-on: ubuntu-latest
@@ -87,7 +87,7 @@ jobs:
           test -n "$INVENTORY"
           printf '%s' "$OPTIONS" > /tmp/opencode/live-options.json
           printf '%s' "$INVENTORY" > /tmp/opencode/live-inventory.json
-      - run: npm run test:live
+      - run: npm run test:live:read
         env:
           ISSUEKEEPER_LIVE_READS: "1"
           ISSUEKEEPER_LIVE_DOWNLOADS: "1"
@@ -98,8 +98,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: jira-live
-          path: packages/opencode-jira/reports/live/
+          name: jira-live-read
+          path: packages/opencode-jira/reports/live-read/
       - name: Remove private inventory
         if: always()
         run: rm -f /tmp/opencode/live-options.json /tmp/opencode/live-inventory.json

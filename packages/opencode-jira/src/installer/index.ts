@@ -6,16 +6,21 @@ import { parseConfig } from "../config.js";
 import { baseOptions, basePermissions } from "../defaults.js";
 import { atomicWrite, hash, privateDirectory, readOptional, removeUnchanged, safeAncestors } from "./files.js";
 import { edit, parseDocument } from "./jsonc.js";
-import { packageName, preparePackage, validatePackage, validateDependencies } from "./package.js";
+import { packageName, preparePackage, validatePackage, validateDependencies, validateStorageEngine } from "./package.js";
 import { installerPaths, type InstallerPaths } from "./paths.js";
+import { withChangeStore } from "../state/coordinator.js";
+import { statePaths } from "../state/paths.js";
+import type { ChangeStore } from "../state/store.js";
 
 const Rule = z.strictObject({ action: z.string(), resource: z.string(), effect: z.enum(["allow", "ask", "deny"]) });
+const ManagedFile = z.strictObject({ path: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) });
 const Manifest = z.strictObject({
   version: z.string(), installed: z.string(), config: z.string(),
   previousInstalled: z.string().optional(),
-  progress: z.enum(["prepared", "instructions", "configured", "complete", "removed"]),
+  previousFiles: z.array(ManagedFile).optional(),
+  progress: z.enum(["prepared", "instructions", "configured", "complete", "removing", "removed"]),
   pluginCreated: z.boolean(), instructionCreated: z.boolean(),
-  files: z.array(z.strictObject({ path: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) })),
+  files: z.array(ManagedFile),
   permissions: z.array(Rule),
 });
 type Manifest = z.infer<typeof Manifest>;
@@ -66,7 +71,7 @@ async function manifest(paths: InstallerPaths): Promise<{ text?: string; value?:
     || !/^[a-f0-9]{64}$/.test(digest)
     || value.installed !== join(paths.data, "copies", digest, "node_modules", packageName)
     || value.previousInstalled !== undefined && !validInstallation(value.previousInstalled)
-    || value.files.some((file) => !allowedFiles(file.path))) throw new Error("Rutas de manifiesto no reconocidas.");
+    || [...value.files, ...(value.previousFiles ?? [])].some((file) => !allowedFiles(file.path))) throw new Error("Rutas de manifiesto no reconocidas.");
   return { text, value };
 }
 
@@ -77,7 +82,7 @@ async function discovery(paths: InstallerPaths): Promise<void> {
   if (entries.some((name) => /jira|issuekeeper/i.test(name))) throw new Error("Posible plugin Jira descubierto automáticamente; revise su migración antes de instalar.");
 }
 
-async function withLock<T>(paths: InstallerPaths, run: () => Promise<T>): Promise<T> {
+async function withLock<T>(paths: InstallerPaths, run: (store: ChangeStore) => Promise<T>): Promise<T> {
   await privateDirectory(paths.data);
   const lockPath = join(paths.data, "installer.lock");
   let lock;
@@ -113,15 +118,16 @@ async function withLock<T>(paths: InstallerPaths, run: () => Promise<T>): Promis
     }
     if (!lock) throw new Error("Otra instalación está activa; no se modificará.");
   }
-  try { return await run(); }
+  try { return await withChangeStore(run, { data: paths.data, mode: "maintenance" }); }
   finally { await lock.close(); await unlink(lockPath); }
 }
 
 export async function install(source: string, io: InstallerIO, options: InstallerOptions = {}): Promise<void> {
   const paths = options.paths ?? installerPaths();
-  return withLock(paths, async () => {
+  return withLock(paths, async (store) => {
     const config = await configuration(paths);
     const previous = await manifest(paths);
+    if (previous.value?.progress === "removing") throw new Error("Retirada interrumpida; complete uninstall --global antes de reinstalar. Los datos se conservan.");
     await discovery(paths);
     const plugins = array(config.value.plugins, "plugins");
     const indexes = plugins.flatMap((entry, index) => isPlugin(entry) ? [index] : []);
@@ -139,6 +145,11 @@ export async function install(source: string, io: InstallerIO, options: Installe
       if (!await io.accept("Se retiró una referencia o jira.md. ¿Restaurar explícitamente los elementos administrados?")) throw new Error("Restauración no aceptada; sin cambios.");
     }
     const prepared = await (options.prepare ?? preparePackage)(source, paths.data);
+    await validatePackage(prepared.installed, prepared.version);
+    const release = prepared.installed.slice(0, -`/node_modules/${packageName}`.length);
+    await validateDependencies(release);
+    validateStorageEngine(release);
+    io.print(`Estado local compatible: ${JSON.stringify(store.diagnostics())}. Se conservan propuestas, hashes, recibos y staging. No se ejecutan migraciones ni consultas Jira.`);
     let text = config.text;
     if (!config.value.$schema) text = edit(text, ["$schema"], "https://opencode.ai/config.json");
     if (index === undefined) text = edit(text, ["plugins"], [...plugins, { package: prepared.installed, options: baseOptions() }]);
@@ -161,14 +172,15 @@ export async function install(source: string, io: InstallerIO, options: Installe
     const added = basePermissions.filter((rule) => !rules.some((existing) => matchesGlob(rule.action, (existing as z.infer<typeof Rule>).action)));
     if (added.length) text = edit(text, ["permissions"], [...rules, ...added]);
     if (rules.length) io.print("Permisos existentes conservados: no se relaja allow/ask/deny. Revise la política efectiva y las reglas de agentes.");
-    const files: Manifest["files"] = [...(previous.value?.files ?? [])];
+    const files: Manifest["files"] = (previous.value?.files ?? []).map((file) => ({ ...file }));
     const writes: { path: string; content: string; original?: string }[] = [];
     for (const [target, name] of [[paths.instructions, "jira.md"], [paths.example, "account.example.jsonc"]]) {
       const template = (await readOptional(join(prepared.installed, "templates", name!)))!;
       if (template === undefined) throw new Error("Plantilla ausente.");
       const original = await readOptional(target!);
       const known = previous.value?.files.find((file) => file.path === target);
-      if (original !== undefined && (!known || hash(original) !== known.hash)) {
+      const prior = previous.value && !["complete", "removed"].includes(previous.value.progress) ? previous.value.previousFiles?.find((file) => file.path === target) : undefined;
+      if (original !== undefined && (!known || ![known.hash, prior?.hash].includes(hash(original)))) {
         if (!known) throw new Error("Archivo de instrucciones o ejemplo de origen desconocido; no se sobrescribe ni se registra.");
         const comparison = `${target}.new-${hash(template).slice(0, 16)}`;
         const comparisonOld = await readOptional(comparison);
@@ -194,12 +206,12 @@ export async function install(source: string, io: InstallerIO, options: Installe
       io.print("Instalación sin diferencias."); return;
     }
     const permissionPlan = added.map((rule) => `  ${rule.action} ${rule.resource}: ${rule.effect}`).join("\n") || "  Sin reglas nuevas; se conservan las existentes.";
-    if (!await io.accept(`Instalar ${packageName} ${prepared.version}\nOrigen: ${source === "local" ? "local" : "tarball"}\nPaquete: ${prepared.installed}\nConfiguración: ${config.path}\nInstrucciones: ${paths.instructions}\nCambios mínimos JSONC; plantillas, referencia al plugin y ${added.length} reglas nuevas:\n${permissionPlan}\nSe conservarán las cuentas y las opciones existentes.`)) throw new Error("Plan no aceptado; configuración e instrucciones sin cambios.");
+    if (!await io.accept(`Instalar ${packageName} ${prepared.version}\nOrigen: ${source === "local" ? "local" : "tarball"}\nPaquete: ${prepared.installed}\nConfiguración: ${config.path}\nInstrucciones: ${paths.instructions}\nEstado global SQLite: ${statePaths(paths.data).directory}\nMotor incluido, sin servidor ni pasos manuales; datos conservados al actualizar/retirar.\nCambios mínimos JSONC; plantillas, referencia al plugin y ${added.length} reglas nuevas:\n${permissionPlan}\nSe conservarán las cuentas y las opciones existentes.`)) throw new Error("Plan no aceptado; configuración e instrucciones sin cambios.");
     if (await readOptional(config.path) !== config.original || await readOptional(paths.manifest) !== previous.text) throw new Error("Edición concurrente detectada; repita el plan.");
     for (const file of writes) if (await readOptional(file.path) !== file.original) throw new Error("Una plantilla cambió durante la revisión.");
     let journal = previous.text;
     async function progress(step: Manifest["progress"]) {
-      const content = `${JSON.stringify({ ...next, ...(step !== "complete" && existing ? { previousInstalled: existing.package } : {}), progress: step }, null, 2)}\n`;
+      const content = `${JSON.stringify({ ...next, ...(step !== "complete" && existing ? { previousInstalled: existing.package } : {}), ...(step !== "complete" && previous.value ? { previousFiles: previous.value.previousFiles ?? previous.value.files } : {}), progress: step }, null, 2)}\n`;
       await atomicWrite(paths.manifest, content, journal); journal = content;
       await options.afterStep?.(step);
     }
@@ -226,7 +238,8 @@ export async function check(io: Pick<InstallerIO, "print">, paths = installerPat
     await validatePackage(m.installed, m.version);
     const root = m.installed.slice(0, -`/node_modules/${packageName}`.length);
     await validateDependencies(root);
-    for (const dep of ["@opencode/plugin", "zod", "jsonc-parser"]) {
+    validateStorageEngine(root);
+    for (const dep of ["@opencode/plugin", "zod", "jsonc-parser", "better-sqlite3"]) {
       if (await readOptional(join(root, "node_modules", dep, "package.json")) === undefined) throw new Error("Dependencias incompletas.");
     }
     const entries = array(config.value.plugins, "plugins").filter(isPlugin);
@@ -237,7 +250,7 @@ export async function check(io: Pick<InstallerIO, "print">, paths = installerPat
     const options = parseConfig((entries[0] as { options?: unknown }).options);
     io.print(`Instalación completa ${m.version}. Cuentas configuradas: ${options.accounts.length}. Opciones globales y permisos presentes; perfiles y secretos omitidos.`);
     io.print(`HTTP: ${options.http.timeoutMs} ms, ${options.http.readMaxAttempts} intentos, ${options.http.maxConcurrentPerAccount} concurrentes por alias y sitio. Salida: ${options.output.pageSize}/${options.output.maxPageSize}, ${options.output.maxTextChars} caracteres. Adjuntos: ${options.attachments.enabled ? "habilitados" : "deshabilitados"}, ${options.attachments.maxFileBytes} bytes, overwrite=false.`);
-    io.print("No comprueba conectividad con Jira ni sustituye una invocación real de las herramientas.");
+    io.print("No comprueba conectividad con Jira, operaciones pendientes ni sustituye una invocación real de las herramientas.");
     return 0;
   } catch (error) {
     io.print(error instanceof Error && !error.name.includes("Syntax") ? error.message : "No se pudo validar la instalación.");
@@ -245,12 +258,13 @@ export async function check(io: Pick<InstallerIO, "print">, paths = installerPat
   }
 }
 
-export async function uninstall(io: InstallerIO, paths = installerPaths()): Promise<void> {
-  return withLock(paths, async () => {
+export async function uninstall(io: InstallerIO, paths = installerPaths(), options: Pick<InstallerOptions, "afterStep"> = {}): Promise<void> {
+  return withLock(paths, async (store) => {
     const recorded = await manifest(paths);
     if (!recorded.value || recorded.value.progress === "removed") { io.print("No hay elementos administrados pendientes de retirada."); return; }
-    if (recorded.value.progress !== "complete") throw new Error("Manifiesto incompleto; reanude la instalación antes de retirar referencias.");
+    if (!["complete", "removing"].includes(recorded.value.progress)) throw new Error("Manifiesto incompleto; reanude la instalación antes de retirar referencias.");
     const m = recorded.value;
+    io.print(`Estado local conservado: ${JSON.stringify(store.diagnostics())}. El usuario del servidor conserva la responsabilidad de los pendientes; use status/verify con su proposalId, sin reenviar.`);
     const config = await configuration(paths);
     const plugins = array(config.value.plugins, "plugins");
     const indexes = plugins.flatMap((entry, index) => isPlugin(entry) && (entry as { package?: unknown })?.package === m.installed ? [index] : []);
@@ -260,7 +274,8 @@ export async function uninstall(io: InstallerIO, paths = installerPaths()): Prom
     const accounts = entry ? parseConfig(entry.options).accounts : [];
     const exportPath = join(paths.data, "preserved-options.json");
     const exportOld = await readOptional(exportPath);
-    if (accounts.length && exportOld !== undefined) throw new Error("Ya existe preserved-options.json; consérvelo en otro lugar antes de exportar cuentas.");
+    const exportContent = accounts.length && m.pluginCreated ? `${JSON.stringify(entry, null, 2)}\n` : undefined;
+    if (exportContent !== undefined && exportOld !== undefined && (m.progress !== "removing" || exportOld !== exportContent)) throw new Error("Ya existe preserved-options.json; consérvelo en otro lugar antes de exportar cuentas.");
     let text = config.text;
     if (index !== undefined && m.pluginCreated) text = edit(text, ["plugins", index], undefined);
     const references = array(config.value.instructions, "instructions");
@@ -270,14 +285,24 @@ export async function uninstall(io: InstallerIO, paths = installerPaths()): Prom
       for (let i = references.length - 1; i >= 0; i--) if (references[i] === paths.instructions) text = edit(text, ["instructions", i], undefined);
     }
     // Existing permission order is retained; rules with uncertain ownership are never removed.
-    if (!await io.accept(`Retirar sólo referencias y plantillas intactas administradas.\nConfiguración: ${config.path}\n${accounts.length ? `Conservar opciones de cuenta en exportación privada: ${exportPath}\n` : ""}Se conservan permisos read/edit, copias del paquete, respaldos, descargas y personalizaciones. No revoca tokens.`)) throw new Error("Retirada no aceptada.");
+    if (!await io.accept(`Retirar sólo referencias y plantillas intactas administradas.\nConfiguración: ${config.path}\n${accounts.length ? `Conservar opciones de cuenta en exportación privada: ${exportPath}\n` : ""}Se conserva todo el estado global SQLite, staging y recibos en ${statePaths(paths.data).directory}.\nSe conservan permisos read/edit, copias del paquete, respaldos, descargas y personalizaciones. No revoca tokens.`)) throw new Error("Retirada no aceptada.");
     if (await readOptional(config.path) !== config.original || await readOptional(paths.manifest) !== recorded.text) throw new Error("Edición concurrente detectada.");
-    if (accounts.length && m.pluginCreated) await atomicWrite(exportPath, `${JSON.stringify(entry, null, 2)}\n`, undefined);
+    let journal = recorded.text;
+    if (m.progress !== "removing") {
+      journal = `${JSON.stringify({ ...m, progress: "removing" }, null, 2)}\n`;
+      await atomicWrite(paths.manifest, journal, recorded.text);
+    }
+    await options.afterStep?.("removing");
+    if (exportContent !== undefined) await atomicWrite(exportPath, exportContent, exportOld);
+    await options.afterStep?.("prepared");
     await atomicWrite(config.path, text, config.original, join(paths.data, "backups"));
+    await options.afterStep?.("configured");
     if (!shared) {
       for (const file of m.files) await removeUnchanged(file.path, file.hash);
     }
-    await atomicWrite(paths.manifest, `${JSON.stringify({ ...m, progress: "removed" }, null, 2)}\n`, recorded.text);
+    await options.afterStep?.("instructions");
+    await atomicWrite(paths.manifest, `${JSON.stringify({ ...m, progress: "removed" }, null, 2)}\n`, journal);
+    await options.afterStep?.("removed");
     io.print("Referencias administradas retiradas. Se conservan paquetes, permisos y archivos personalizados; no se revocan tokens.");
   });
 }
