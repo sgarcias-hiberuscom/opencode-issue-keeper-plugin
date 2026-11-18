@@ -27,7 +27,7 @@ try {
   const packed = Array.isArray(result) ? result[0] : Object.values(result)[0];
   const files = packed.files.map((file) => file.path);
   for (const required of ["dist/index.js", "dist/cli.js", "dist/uploads.js", "dist/state/staging.js", "dist/state/store.js", "dist/state/coordinator.js", "dist/state/application.js", "dist/state/runtime.js", "dist/state/multipart.js", "dist/state/review.js", "dist/state/operator.js", "dist/core/markdown.js", "dist/core/comment.js", "dist/core/adf-document.js", "dist/jira/mutations.js", "dist/jira/changes.js", "dist/jira/preparation.js", "dist/jira/attachment-links.js", "dist/tools/changes.js", "dist/tools/shared.js", "dist/tools/change-schemas.js", "options.schema.json", "templates/jira.md", "templates/account.example.jsonc", "templates/commands/jira-get.md", "templates/commands/jira-list.md", "templates/commands/jira-update.md"]) assert(files.includes(required));
-  assert(files.every((file) => /^(?:dist\/|templates\/|README\.md$|options\.schema\.json$|opencode\.example\.jsonc$|package\.json$)/.test(file)));
+  assert(files.every((file) => /^(?:dist\/|templates\/|README\.md$|LICENSE$|CHANGELOG\.md$|SECURITY\.md$|options\.schema\.json$|opencode\.example\.jsonc$|package\.json$)/.test(file)));
   const scanned = join(directory, "tarball-scan");
   await mkdir(scanned);
   const entries = execFileSync("tar", ["-tzf", join(directory, packed.filename)], { encoding: "utf8", timeout: 10000 }).split("\n").filter(Boolean);
@@ -139,8 +139,8 @@ try {
     await mkdir(upgradeSource);
     execFileSync("tar", ["-xzf", archive, "-C", upgradeSource], { timeout: 10000 });
     const nextPackage = join(upgradeSource, "package");
-    const versionParts = manifest.version.split(".");
-    const nextManifest = { ...manifest, version: `${versionParts[0]}.${versionParts[1]}.${Number(versionParts[2]) + 1}` };
+    const versionMatch = manifest.version.match(/^(\d+)\.(\d+)\.(\d+)/);
+    const nextManifest = { ...manifest, version: `${versionMatch[1]}.${versionMatch[2]}.${Number(versionMatch[3]) + 1}` };
     await writeFile(join(nextPackage, "package.json"), JSON.stringify(nextManifest));
     const nextResult = JSON.parse(execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", directory], { cwd: nextPackage, env: npmEnv, encoding: "utf8", timeout: 20000 }));
     const nextPack = Array.isArray(nextResult) ? nextResult[0] : Object.values(nextResult)[0];

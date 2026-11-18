@@ -9,7 +9,7 @@ describe("[M4][PKG-01][TST-03][EN-01][OP-05] independent and offline delivery", 
     const pkg = JSON.parse(await read("../../package.json")); const lock = JSON.parse(await read("../../package-lock.json"));
     expect(pkg.version).toBe(lock.version); expect(pkg.version).toBe(lock.packages[""].version);
     expect(pkg.dependencies).toEqual(lock.packages[""].dependencies); expect(pkg.issuekeeperState).toEqual(stateCompatibility);
-    expect(pkg.private).toBe(true); expect(pkg.files).toEqual(["dist", "templates", "README.md", "options.schema.json", "opencode.example.jsonc"]);
+    expect(pkg.private).toBe(true); expect(pkg.files).toEqual(["dist", "templates", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "options.schema.json", "opencode.example.jsonc"]);
     for (const script of ["preinstall", "install", "postinstall"]) expect(pkg.scripts[script]).toBeUndefined();
   });
   it("never selects live suites from default/offline commands and scopes inherited live to reads", async () => {
