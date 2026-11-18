@@ -22,11 +22,13 @@ export async function startRegistryServer(tarballPath, options = {}) {
         return;
       }
       const name = options.otherName ? "@issuekeeper/opencode-other" : pkg.name;
+      // npm exec builds the tree and bin links from registry metadata, not from
+      // the tarball manifest: the packument must declare them like npmjs does.
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
         name,
         "dist-tags": { latest: pkg.version },
-        versions: { [pkg.version]: { name, version: pkg.version, dist: { tarball: `http://127.0.0.1:${port}/tarball.tgz`, ...(options.wrongIntegrity ? {} : { integrity }) } } },
+        versions: { [pkg.version]: { name, version: pkg.version, bin: pkg.bin, dependencies: pkg.dependencies, dist: { tarball: `http://127.0.0.1:${port}/tarball.tgz`, ...(options.wrongIntegrity ? {} : { integrity }) } } },
       }));
       return;
     }

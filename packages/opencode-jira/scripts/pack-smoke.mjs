@@ -7,16 +7,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const variant = process.argv[2];
 if (variant === undefined) {
-  const results = await Promise.all(["tarball", "local"].map((source) => new Promise((resolve, reject) => {
+  const results = await Promise.all(["tarball", "local", "registry"].map((source) => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), source], { stdio: "inherit", timeout: 240000 });
     child.once("error", reject);
     child.once("close", (code, signal) => resolve({ source, code, signal }));
   })));
   for (const result of results) assert.equal(result.code, 0, `Smoke ${result.source} incompleto (${result.signal ?? result.code}).`);
-  console.log("Entrega aislada: quince herramientas, CLI local/tgz, actualización compatible, apply protegido/deduplicado y conservación tras retirada comprobados.");
+  console.log("Entrega aislada: quince herramientas, CLI local/tgz/registro, actualización compatible, apply protegido/deduplicado y conservación tras retirada comprobados.");
   process.exit(0);
 }
-assert(["tarball", "local"].includes(variant), "Variante de empaquetado desconocida.");
+assert(["tarball", "local", "registry"].includes(variant), "Variante de empaquetado desconocida.");
 
 const directory = await mkdtemp("/tmp/opencode/issuekeeper-pack-");
 try {
@@ -86,7 +86,7 @@ try {
   const functional = join(directory, "functional-smoke.mjs");
   await copyFile(new URL("./package-functional-smoke.mjs", import.meta.url), functional);
   globalThis.fetch = async () => { throw new Error("Jira network is prohibited during installation"); };
-  for (const source of [variant === "local" ? "local" : archive]) {
+  for (const source of variant === "registry" ? [] : [variant === "local" ? "local" : archive]) {
     const home = join(directory, source === "local" ? "local home" : "tarball home");
     const env = { ...npmEnv, HOME: home, XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data") };
     const paths = installerPaths(env);
@@ -159,6 +159,92 @@ try {
     assert.equal(await readFile(join(reopened.paths.staging, staged[0].stagedRef), "utf8"), "Synthetic staged bytes");
     reopened.close();
     execFileSync(process.execPath, [functional, nextCopy, "inspect", functionalRecord], { env, cwd: directory, stdio: "pipe", timeout: 20000 });
+  }
+  if (variant === "registry") {
+    // Full journey from a simulated registry, outside the workspace: npm exec
+    // runs the published CLI, whose install --global resolves "registry" and
+    // verifies name, version and SHA-512 through ISSUEKEEPER_REGISTRY.
+    // The scope routes to the simulated registry: npm exec resolves the whole
+    // tree against a single registry, and the simulated one only serves this
+    // package (a real private registry is configured per scope in .npmrc).
+    const { startRegistryServer } = await import(new URL("../test/fixtures/registry-server.mjs", import.meta.url));
+    const server = await startRegistryServer(archive);
+    try {
+      const home = join(directory, "registry home");
+      const cwd = join(directory, "registry project");
+      await mkdir(cwd);
+      const env = { ...npmEnv, HOME: home, XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), ISSUEKEEPER_REGISTRY: server.url };
+      const execRegistry = (args, input = "") => new Promise((resolve, reject) => {
+        const command = `npm exec --yes --legacy-peer-deps --@issuekeeper:registry=${server.url} --package=@issuekeeper/opencode-jira@${manifest.version} -- ${args}`;
+        const child = spawn("script", ["-qfec", command, "/dev/null"], { env, cwd, timeout: 120000 });
+        let output = "";
+        child.stdout.on("data", (chunk) => { output += chunk; });
+        child.stderr.on("data", (chunk) => { output += chunk; });
+        child.stdin.end(input);
+        child.once("error", reject);
+        child.once("close", (code, signal) => code === 0 ? resolve(output) : reject(new Error(`npm exec ${args} falló (${signal ?? code}):\n${output}`)));
+      });
+      const installOutput = await execRegistry("issuekeeper-jira install --global", "s\n");
+      assert(installOutput.includes(`Origen: registro (${manifest.version})`), installOutput);
+      assert(installOutput.includes("Paquete instalado"), installOutput);
+      const paths = installerPaths(env);
+      const configPath = join(paths.config, "opencode.jsonc");
+      const readConfig = () => readFile(configPath, "utf8");
+      const registryConfig = JSON.parse(await readConfig());
+      assert.deepEqual(registryConfig.plugins[0].options.accounts, []);
+      const copy = registryConfig.plugins[0].package;
+      assert(registryConfig.instructions.filter((reference) => reference === paths.instructions).length === 1, await readConfig());
+      assert.equal(await readFile(paths.instructions, "utf8"), await readFile(join(copy, "templates", "jira.md"), "utf8"));
+      const copyManifest = JSON.parse(await readFile(join(copy, "package.json"), "utf8"));
+      assert.equal(copyManifest.version, manifest.version);
+      const toolsProbe = join(home, "registry-tools.mjs");
+      const toolsRecord = join(home, "registry-tools.json");
+      await writeFile(toolsProbe, [
+        `import { writeFile } from "node:fs/promises";`,
+        `import { join } from "node:path";`,
+        `import { pathToFileURL } from "node:url";`,
+        `const [installed, record] = process.argv.slice(2);`,
+        `const { default: plugin } = await import(pathToFileURL(join(installed, "dist/index.js")).href);`,
+        `const tools = [];`,
+        `const cleanup = await plugin.setup({`,
+        `  location: { directory: process.cwd() },`,
+        `  options: { accounts: [] },`,
+        `  tool: { transform: async (callback) => callback({ namespace() {}, add(tool) { tools.push(tool); } }) },`,
+        `  permission: { assert: async () => { throw new Error("No execution expected during plugin setup"); } },`,
+        `});`,
+        `await cleanup?.();`,
+        `await writeFile(record, JSON.stringify(tools.map((tool) => tool.name).sort()));`,
+      ].join("\n"));
+      execFileSync(process.execPath, [toolsProbe, copy, toolsRecord], { env, cwd, timeout: 30000 });
+      assert.deepEqual(JSON.parse(await readFile(toolsRecord, "utf8")), [
+        "accounts_list", "attachment_download", "attachment_upload_prepare", "attachments_list", "change_apply", "comment_prepare", "comments_list", "connection_test", "issue_edit_metadata", "issue_get", "issue_update_prepare", "issues_search", "mention_candidates", "transition_prepare", "transitions_list",
+      ]);
+      const checkOutput = execFileSync(process.execPath, [join(copy, "dist/cli.js"), "check", "--global"], { env, cwd, encoding: "utf8", timeout: 30000 });
+      assert(checkOutput.includes("No comprueba conectividad"), checkOutput);
+      const { ChangeStore: CopiedStore } = await import(pathToFileURL(join(copy, "dist/state/store.js")).href);
+      const stamp = new Date();
+      const created = stamp.toISOString();
+      const expires = new Date(stamp.getTime() + 600000).toISOString();
+      const store = new CopiedStore(paths.data, { now: () => stamp });
+      const plan = {
+        version: 1, id: "registry-proposal", sessionID: "registry-session", locationID: "c".repeat(64), account: "qa", site: "https://synthetic.invalid",
+        credentialIdentity: "synthetic-person", issueId: "1", issueKey: "SYN-1", projectKey: "SYN", kind: "fields",
+        steps: [{ id: "step-1", kind: "mutation", fileRefs: [] }], files: [], expectedUpdated: created, policyFingerprint: "d".repeat(64),
+        payload: {}, summary: "Registry smoke proposal", createdAt: created, expiresAt: expires,
+      };
+      const saved = store.prepare(plan); store.close();
+      const before = await readConfig();
+      const reinstallOutput = await execRegistry("issuekeeper-jira install --global");
+      assert(reinstallOutput.includes("Instalación sin diferencias."), reinstallOutput);
+      assert.equal(await readConfig(), before);
+      const uninstallOutput = await execRegistry("issuekeeper-jira uninstall --global", "s\n");
+      assert(uninstallOutput.includes("Referencias administradas retiradas"), uninstallOutput);
+      assert.deepEqual(JSON.parse(await readConfig()).plugins, []);
+      assert(!existsSync(paths.instructions));
+      const reopened = new CopiedStore(paths.data);
+      assert.deepEqual(reopened.get(plan.id), saved);
+      reopened.close();
+    } finally { await server.close(); }
   }
   console.log(`Smoke ${variant}: instalación, npm exec, check, reinstalación y retirada correctos.`);
 } finally {
