@@ -6,6 +6,7 @@ import { mutationRequest, MutationUncertainError, type JiraMutation, type Mutati
 import { pinnedMultipart } from "./state/multipart.js";
 import type { PinnedFile } from "./core/proposals.js";
 import { cancellation, httpError, invalidResponse, IssueKeeperError } from "./errors.js";
+import { metrics, type MetricKind } from "./metrics.js";
 import { operations } from "./core/operation.js";
 
 class Semaphore {
@@ -103,6 +104,28 @@ export class HttpClient {
 
   close(): void { this.shutdown.abort(); }
 
+  private labels(account: Account, kind: MetricKind): { account: string; kind: MetricKind } {
+    return { account: account.id, kind };
+  }
+
+  private async timedFetch(account: Account, kind: MetricKind, url: URL | string, init: RequestInit): Promise<Response> {
+    const labels = this.labels(account, kind);
+    metrics.increment("http.requests", labels);
+    const started = performance.now();
+    try { return await this.fetcher(url, init); }
+    catch (error) {
+      metrics.increment("http.errors", labels);
+      throw error;
+    } finally { metrics.recordLatency(performance.now() - started, labels); }
+  }
+
+  private countStatus(account: Account, kind: MetricKind, status: number): void {
+    const labels = this.labels(account, kind);
+    if (status === 429) metrics.increment("http.429", labels);
+    else if (status >= 500 && status < 600) metrics.increment("http.5xx", labels);
+    else if (status >= 300) metrics.increment("http.errors", labels);
+  }
+
   private queues(account: Account): [Semaphore, Semaphore] {
     let site = this.sites.get(account.siteUrl);
     if (!site) { site = new Semaphore(this.config.http.maxConcurrentPerAccount); this.sites.set(account.siteUrl, site); }
@@ -185,7 +208,9 @@ export class HttpClient {
       cancellation(combined);
       const operation = operations.getStore(); if (operation) operation.attempts++;
       attempted = true;
-      const response = await this.fetcher(url, { method: request.method, headers: { Authorization: header, Accept: "application/json", ...request.headers }, body: request.body, redirect: "manual", signal: combined, ...(binary ? { duplex: "half" } : {}) });
+      const kind: MetricKind = binary ? "binary" : "write";
+      const response = await this.timedFetch(account, kind, url, { method: request.method, headers: { Authorization: header, Accept: "application/json", ...request.headers }, body: request.body, redirect: "manual", signal: combined, ...(binary ? { duplex: "half" } : {}) });
+      this.countStatus(account, kind, response.status);
       if (operation) operation.status = response.status;
       try {
         if ([400, 401, 403, 404, 409, 413, 415, 422, 429].includes(response.status)) return { outcome: "rejected", status: response.status };
@@ -226,11 +251,19 @@ export class HttpClient {
       release = await this.acquire(account, combined);
       const operation = operations.getStore();
       if (operation) operation.attempts++;
-      const response = await this.fetcher(`${account.siteUrl}/_edge/tenant_info`, { method: "GET", headers: { Accept: "application/json" }, redirect: "manual", signal: combined });
+      const response = await this.timedFetch(account, "read", `${account.siteUrl}/_edge/tenant_info`, { method: "GET", headers: { Accept: "application/json" }, redirect: "manual", signal: combined });
       if (operation) operation.status = response.status;
       try {
-        if (response.status >= 300 && response.status < 400) throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección JSON no autorizada.");
-        if (!response.ok) throw httpError(response.status);
+        if (response.status >= 300 && response.status < 400) {
+          await response.body?.cancel();
+          this.countStatus(account, "read", response.status);
+          throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección JSON no autorizada.");
+        }
+        if (!response.ok) {
+          await response.body?.cancel();
+          this.countStatus(account, "read", response.status);
+          throw httpError(response.status);
+        }
         return await readJson(response, this.config.http.maxResponseBytes, combined);
       } finally { await response.body?.cancel().catch(() => {}); }
     } catch (error) {
@@ -249,6 +282,7 @@ export class HttpClient {
   ): Promise<T> {
     const url = apiUrl(account, path);
     if (search !== undefined && path !== "rest/api/3/search/jql") throw new IssueKeeperError("FORBIDDEN", "Sólo está permitido POST de búsqueda.");
+    const kind: MetricKind = binary ? "binary" : "read";
     const timeoutMs = binary ? this.config.attachments.transferTimeoutMs : this.config.http.timeoutMs;
     const deadline = Date.now() + timeoutMs;
     const timeout = new AbortController();
@@ -268,7 +302,7 @@ export class HttpClient {
           cancellation(combined);
           const operation = operations.getStore();
           if (operation) operation.attempts++;
-          const response = await this.fetcher(url, {
+          const response = await this.timedFetch(account, kind, url, {
             method: search === undefined ? "GET" : "POST",
             headers: {
               Authorization: auth, Accept: binary ? "*/*" : "application/json",
@@ -284,21 +318,24 @@ export class HttpClient {
             // media destination over HTTPS; credentials are never forwarded
             // and the signed URL is never reported or logged.
             if (!binary || ![301, 302, 303, 307, 308].includes(response.status)) {
+              this.countStatus(account, kind, response.status);
               throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
             }
             const target = mediaDestination(response.headers.get("location"));
             if (operation) operation.attempts++;
-            const media = await this.fetcher(target, {
+            const media = await this.timedFetch(account, "binary", target, {
               method: "GET", headers: { Accept: "*/*" }, credentials: "omit",
               redirect: "manual", signal: combined,
             });
             if (operation) operation.status = media.status;
             if (media.status >= 300 && media.status < 400) {
               await media.body?.cancel();
+              this.countStatus(account, "binary", media.status);
               throw new IssueKeeperError("REDIRECT_NOT_ALLOWED", "Redirección bloqueada: no se ha validado un destino autorizado.");
             }
             if (!media.ok) {
               await media.body?.cancel();
+              this.countStatus(account, "binary", media.status);
               throw new IssueKeeperError("TRANSFER_INCOMPLETE", "La transferencia no llegó al destino de medios autorizado.");
             }
             try { return await consume(media, combined); }
@@ -306,6 +343,7 @@ export class HttpClient {
           }
           if (!response.ok) {
             await response.body?.cancel();
+            this.countStatus(account, kind, response.status);
             throw httpError(response.status, retryAfter(response.headers.get("retry-after")), path.startsWith("rest/servicedeskapi/"));
           }
           try { return await consume(response, combined); }

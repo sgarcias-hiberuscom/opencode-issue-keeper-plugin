@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { lstatSync, readdirSync, statfsSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, statfsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isMainThread } from "node:worker_threads";
@@ -401,13 +401,16 @@ export class ChangeStore {
     }
     return removed;
   }
-  diagnostics(): { prepared: number; applying: number; applied: number; failed: number; unknown: number } {
-    const result = { prepared: 0, applying: 0, applied: 0, failed: 0, unknown: 0 };
+  countByState(): Record<string, number> {
+    const result: Record<string, number> = { prepared: 0, applying: 0, applied: 0, failed: 0, unknown: 0 };
     for (const row of this.all("SELECT state, COUNT(*) AS count FROM executions GROUP BY state")) {
       if (!Object.hasOwn(result, String(row.state))) throw new StateError("CORRUPT");
-      result[String(row.state) as keyof typeof result] = Number(row.count);
+      result[String(row.state)] = Number(row.count);
     }
     return result;
+  }
+  diagnostics(): { prepared: number; applying: number; applied: number; failed: number; unknown: number } {
+    return this.countByState() as { prepared: number; applying: number; applied: number; failed: number; unknown: number };
   }
   assertMaintenanceSafe(): void {
     if (this.stagingLeases) throw new StateError("BUSY");
@@ -431,4 +434,70 @@ export class ChangeStore {
       }
     }
   }
+}
+
+export interface ExecutionDigest {
+  state: string;
+  updatedAt: string;
+  steps: string[];
+  files: number;
+  receipts: number;
+  verifiedReceipts: number;
+}
+export interface ExecutionDigests {
+  states: Record<string, number>;
+  executions: ExecutionDigest[];
+}
+
+function openReadonly(data: string): Database.Database | undefined {
+  const paths = statePaths(data);
+  if (!existsSync(paths.database)) return undefined;
+  try { return new Database(paths.database, { readonly: true, fileMustExist: true }); }
+  catch (error) {
+    if (String((error as { code?: string }).code ?? "").startsWith("SQLITE_BUSY")) throw new StateError("BUSY");
+    throw new StateError("CORRUPT");
+  }
+}
+
+// Read-only aggregate over the executions: it never opens the store for
+// writing, never purges and never takes the owner lock. Documents are parsed
+// defensively for counts only; no plan or receipt content leaves this module.
+export function readExecutionDigests(data: string): ExecutionDigests {
+  const states: Record<string, number> = { prepared: 0, applying: 0, applied: 0, failed: 0, unknown: 0 };
+  const executions: ExecutionDigest[] = [];
+  const db = openReadonly(data);
+  if (!db) return { states, executions };
+  try {
+    const rows = db.prepare<[], Row>("SELECT e.id AS id, e.state AS state, e.updated_at AS updated_at, e.document AS execution, p.document AS plan FROM executions e JOIN plans p ON p.id=e.id ORDER BY e.id").all();
+    const receiptsStatement = db.prepare<[Scalar], Row>("SELECT document FROM receipts WHERE proposal=?");
+    for (const row of rows) {
+      const state = String(row.state);
+      if (!Object.hasOwn(states, state)) throw new StateError("CORRUPT");
+      states[state] = (states[state] ?? 0) + 1;
+      let steps: string[] = [];
+      let files = 0;
+      let receipts = 0;
+      let verifiedReceipts = 0;
+      try {
+        const execution = JSON.parse(String(row.execution)) as { steps?: Array<{ state?: unknown }> };
+        steps = Array.isArray(execution.steps) ? execution.steps.map((step) => String(step?.state)) : [];
+        const plan = JSON.parse(String(row.plan)) as { files?: unknown };
+        files = Array.isArray(plan.files) ? plan.files.length : 0;
+        for (const receipt of receiptsStatement.all(String(row.id))) {
+          receipts++;
+          const document = JSON.parse(String(receipt.document)) as { verifiedAt?: unknown };
+          if (typeof document.verifiedAt === "string" && document.verifiedAt) verifiedReceipts++;
+        }
+      } catch (error) {
+        if (error instanceof StateError) throw error;
+        throw new StateError("CORRUPT");
+      }
+      executions.push({ state: String(row.state), updatedAt: String(row.updated_at), steps, files, receipts, verifiedReceipts });
+    }
+    return { states, executions };
+  } catch (error) {
+    if (String((error as { code?: string }).code ?? "").startsWith("SQLITE_BUSY")) throw new StateError("BUSY");
+    if (error instanceof StateError) throw error;
+    throw new StateError("CORRUPT");
+  } finally { db.close(); }
 }

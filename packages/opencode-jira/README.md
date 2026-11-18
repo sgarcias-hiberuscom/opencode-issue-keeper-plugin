@@ -198,6 +198,12 @@ issuekeeper-jira status --global --proposal ID
 issuekeeper-jira verify --global --proposal ID
 ```
 
+`status --global` también funciona **sin** `--proposal`: imprime un resumen JSON
+global del almacén (recuento por estado, inciertos, parciales y fecha del
+pendiente más antiguo) en modo sólo lectura, sin abrir la base para escritura ni
+purgar. No incluye claves de ticket, rutas ni contenido. Con `--proposal` el
+comportamiento no cambia.
+
 `review` exige terminal local: el usuario abre la ruta impresa en el navegador y copia
 el hash de la vista que figura al final. No acepta `--yes` ni tuberías. Registra
 acceso/revisión del documento exacto, **no autorización de envío**; la aplicación
@@ -358,6 +364,15 @@ propagan nativamente; los errores de aplicación incluyen `warnings`, `fieldErro
 cuando proceda, y `meta`. `TIMEOUT` sólo corresponde al temporizador interno.
 Una línea JSON en stderr correlaciona `requestId`, herramienta, alias, operación,
 último estado HTTP, intentos y duración. No registra cuerpos, cabeceras ni URLs.
+
+### Métricas del proceso
+
+Al liberar el plugin se escribe una línea JSON en stderr con el mismo formato de
+diagnóstico: `{"event":"issuekeeper.metrics","metrics":{...}}`. Sólo contiene
+contadores de baja cardinalidad: peticiones, 429, 5xx, errores, suma/máximo de
+latencia por alias y tipo (`read`/`write`/`binary`), y propuestas preparadas,
+aplicadas, rechazadas, en conflicto o inciertas por alias. Nunca incluye texto
+de tickets, claves, hashes, rutas ni identificadores de petición.
 
 ### JQL y minimización
 

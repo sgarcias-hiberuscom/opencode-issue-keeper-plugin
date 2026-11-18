@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { config, configTwoSites, createService, issue, json, mockFetch } from "../helpers.js";
 import { toolHarness } from "../harness.js";
 import { HttpClient } from "../../src/http.js";
+import { metrics } from "../../src/metrics.js";
 import type { Config } from "../../src/config.js";
 
 let root: string;
@@ -156,6 +157,33 @@ describe("[10.2] read concurrency and load", () => {
       expect(fetcher).toHaveBeenCalledTimes(8);
       for (const seen of calls.values()) expect(seen).toBe(2);
       expect(Math.max(...calls.values())).toBeLessThanOrEqual(c.http.readMaxAttempts);
+    } finally { http.close(); }
+  });
+
+  it("[11.4][metrics] counts 429 responses and total requests per account", async () => {
+    vi.useFakeTimers();
+    metrics.reset();
+    const c = config();
+    c.http.maxConcurrentPerAccount = 1;
+    const calls = new Map<string, number>();
+    const fetcher = mockFetch((url) => {
+      const seen = (calls.get(url.pathname) ?? 0) + 1;
+      calls.set(url.pathname, seen);
+      return seen === 1 && /[12]$/.test(url.pathname) ? json({}, 429, { "retry-after": "1" }) : json({ accountId: "known" });
+    });
+    const http = new HttpClient(c, fetcher);
+    try {
+      const signal = new AbortController().signal;
+      const pending = Array.from({ length: 10 }, (_, index) => http.json(c.accounts[0]!, `rest/api/3/issue/IK-${index + 1}`, signal));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(10);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await Promise.all(pending)).toHaveLength(10);
+      expect(fetcher).toHaveBeenCalledTimes(12);
+      const snapshot = metrics.snapshot();
+      expect(snapshot["http.429"]).toEqual({ "account=work,kind=read": 2 });
+      const requests = Object.values(snapshot["http.requests"]!).reduce((total, value) => total + value, 0);
+      expect(requests).toBe(12);
     } finally { http.close(); }
   });
 

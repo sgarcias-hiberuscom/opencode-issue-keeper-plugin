@@ -2,6 +2,7 @@ import type { ChangePlan, StepReceipt, StoredChange } from "../core/proposals.js
 import { planHash, validatePlan } from "../core/proposals.js";
 import { assertReviewed, changeReview, type ChangeReview, type ReviewEvidence } from "../core/review.js";
 import { cancellation, IssueKeeperError } from "../errors.js";
+import { metrics } from "../metrics.js";
 import { withChangeStore } from "./coordinator.js";
 import { StateError } from "./errors.js";
 import type { ChangeStore, StoreOptions } from "./store.js";
@@ -62,7 +63,9 @@ export class ChangeApplication<Binding> {
         await this.validate(plan, context);
         changeReview(plan);
         await this.context(plan, context);
-        return store.prepare(plan);
+        const saved = await store.prepare(plan);
+        metrics.increment("proposals.prepared", { account: plan.account });
+        return saved;
       } catch (error) {
         try { store.discardUnassociated(input.files); }
         catch { console.error(JSON.stringify({ operation: "prepare-cleanup", code: "STAGING_RETAINED" })); }
@@ -88,6 +91,7 @@ export class ChangeApplication<Binding> {
     if (planHash(plan) !== expectedHash || current.account !== plan.account || current.site !== plan.site || current.credentialIdentity !== plan.credentialIdentity
       || current.issueId !== plan.issueId || current.issueKey !== plan.issueKey || current.projectKey !== plan.projectKey
       || current.policyFingerprint !== plan.policyFingerprint || requireFreshness && Date.parse(current.updated) !== Date.parse(plan.expectedUpdated)) {
+      metrics.increment("proposals.conflict", { account: plan.account });
       throw new IssueKeeperError("CONFLICT", "Cambió el contexto, identidad, política o ticket de la propuesta; no se enviará otro paso.");
     }
     await this.context(plan, context);
@@ -134,6 +138,8 @@ export class ChangeApplication<Binding> {
           if (!journaled) throw new StateError("CONFLICT");
           let current = store.get(proposalId);
           if (outcome.outcome !== "confirmed") {
+            if (outcome.outcome === "rejected") metrics.increment("proposals.rejected", { account: plan.account });
+            else metrics.increment("proposals.uncertain", { account: plan.account });
             store.stop(proposalId, current.execution.revision, step.id, outcome.outcome === "rejected" ? "failed" : "unknown", undefined, outcome.outcome === "rejected" ? outcome.status : undefined);
             cancellation(context.signal);
             return store.get(proposalId);
@@ -142,15 +148,22 @@ export class ChangeApplication<Binding> {
           await this.context(plan, context);
           const verified = await this.ports.verify(structuredClone(plan), structuredClone(step), structuredClone(current.receipts[step.id]!), validation.binding, context);
           await this.context(plan, context);
-          if (!verified) { this.stop(store, proposalId); return store.get(proposalId); }
+          if (!verified) {
+            this.stop(store, proposalId);
+            if (store.get(proposalId).execution.state === "unknown") metrics.increment("proposals.uncertain", { account: plan.account });
+            return store.get(proposalId);
+          }
           store.verified(proposalId, current.execution.revision, step.id, undefined, typeof verified === "object" ? verified.updated : undefined);
         }
         await this.context(plan, context);
-        return store.get(proposalId);
+        const finished = store.get(proposalId);
+        if (finished.execution.state === "applied") metrics.increment("proposals.applied", { account: plan.account });
+        return finished;
       } catch (error) {
         try { this.stop(store, proposalId); }
         finally { cancellation(context.signal); }
         if (error instanceof IssueKeeperError && store.get(proposalId).execution.state === "unknown") {
+          metrics.increment("proposals.uncertain", { account: plan.account });
           throw new IssueKeeperError("WRITE_OUTCOME_UNKNOWN", "Se conserva el progreso confirmado o incierto. Consulte status/verify; no repita la mutación.");
         }
         throw error;
@@ -171,6 +184,7 @@ export class ChangeApplication<Binding> {
         await this.context(saved.plan, context);
         if (verified) {
           saved = store.verified(proposalId, saved.execution.revision, step.id, undefined, typeof verified === "object" ? verified.updated : undefined);
+          if (saved.execution.state === "applied") metrics.increment("proposals.applied", { account: saved.plan.account });
         }
       }
       return saved;

@@ -8,6 +8,8 @@ import { parseDocument } from "../installer/jsonc.js";
 import { installerPaths } from "../installer/paths.js";
 import { JiraChangeAdapter } from "../jira/changes.js";
 import type { StoredChange } from "../core/proposals.js";
+import { userDataDirectory } from "./paths.js";
+import { readExecutionDigests } from "./store.js";
 import { withChangeStore } from "./coordinator.js";
 
 export function operatorSummary(saved: StoredChange) {
@@ -24,6 +26,32 @@ export function operatorSummary(saved: StoredChange) {
 }
 export async function inspectProposal(proposalId: string, data?: string) {
   return withChangeStore((store) => operatorSummary(store.get(proposalId)), { data });
+}
+
+export interface ExecutionsSummary {
+  states: Record<string, number>;
+  uncertain: number;
+  partial: number;
+  oldestPendingAt: string | null;
+}
+
+export function summarizeExecutions(data?: string): ExecutionsSummary {
+  const { states, executions } = readExecutionDigests(data ?? userDataDirectory());
+  let uncertain = 0;
+  let partial = 0;
+  let oldest: number | undefined;
+  for (const digest of executions) {
+    const unverified = digest.receipts - digest.verifiedReceipts;
+    if (digest.steps.some((state) => state === "sending" || state === "unknown")
+      || digest.state === "unknown" && unverified > 0) uncertain++;
+    if (digest.files > 0 && digest.receipts > 0 && digest.state !== "applied"
+      && digest.steps.some((state) => state === "pending" || state === "failed")) partial++;
+    if (["prepared", "applying", "unknown"].includes(digest.state)) {
+      const at = Date.parse(digest.updatedAt);
+      if (Number.isFinite(at) && (oldest === undefined || at < oldest)) oldest = at;
+    }
+  }
+  return { states, uncertain, partial, oldestPendingAt: oldest === undefined ? null : new Date(oldest).toISOString() };
 }
 
 export async function installedConfiguration(): Promise<Config> {

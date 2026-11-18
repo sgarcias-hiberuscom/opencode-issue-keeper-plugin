@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -8,13 +9,14 @@ import { IssueKeeperError } from "./errors.js";
 import { check, install, uninstall, type InstallerIO } from "./installer/index.js";
 import { reviewProposal } from "./state/review.js";
 import { LocalId } from "./core/proposals.js";
-import { inspectProposal, installedConfiguration, verifyRecorded } from "./state/operator.js";
+import { inspectProposal, installedConfiguration, summarizeExecutions, verifyRecorded } from "./state/operator.js";
+import { statePaths, userDataDirectory } from "./state/paths.js";
 import { StateError } from "./state/errors.js";
 
 export function parseArguments(args: string[]) {
   const [command, ...rest] = args;
   const proposalCommand = ["review", "status", "verify"].includes(command ?? "");
-  if (!["install", "check", "uninstall", "review", "status", "verify"].includes(command ?? "") || !rest.includes("--global")) throw new Error("Uso: issuekeeper-jira install --global --source local|archivo.tgz | check --global | uninstall --global | review|status|verify --global --proposal ID");
+  if (!["install", "check", "uninstall", "review", "status", "verify"].includes(command ?? "") || !rest.includes("--global")) throw new Error("Uso: issuekeeper-jira install --global --source local|archivo.tgz | check --global | uninstall --global | review|verify --global --proposal ID | status --global [--proposal ID]");
   const allowed = command === "install" ? ["--global", "--source"] : proposalCommand ? ["--global", "--proposal"] : ["--global"];
   let source: string | undefined;
   let proposalId: string | undefined;
@@ -32,7 +34,7 @@ export function parseArguments(args: string[]) {
     }
   }
   if (command === "install" && !source) throw new Error("La instalación desde registro no está disponible; use --source local o un tarball .tgz.");
-  if (proposalCommand && !proposalId) throw new Error("--proposal es obligatorio.");
+  if (proposalCommand && command !== "status" && !proposalId) throw new Error("--proposal es obligatorio.");
   return { command: command!, source, ...(proposalId ? { proposalId } : {}) };
 }
 export async function main(args = process.argv.slice(2), io: InstallerIO = {
@@ -47,7 +49,14 @@ export async function main(args = process.argv.slice(2), io: InstallerIO = {
 }): Promise<number> {
   try {
     const { command, source, proposalId } = parseArguments(args);
-    if (command === "status") { io.print(JSON.stringify(await inspectProposal(proposalId!), null, 2)); return 0; }
+    if (command === "status") {
+      if (!proposalId && !existsSync(statePaths(userDataDirectory()).directory)) {
+        io.print("Todavía no hay ejecuciones registradas; el estado se crea al preparar la primera propuesta.");
+        return 1;
+      }
+      io.print(JSON.stringify(proposalId ? await inspectProposal(proposalId) : summarizeExecutions(), null, 2));
+      return 0;
+    }
     if (command === "verify") {
       if (!stdin.isTTY || !stdout.isTTY) throw new IssueKeeperError("FORBIDDEN", "La comprobación operativa requiere una terminal local.");
       io.print(JSON.stringify(await verifyRecorded(proposalId!, await installedConfiguration(), { authorizeDownload: async (plan, id) => {

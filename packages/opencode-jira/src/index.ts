@@ -4,6 +4,7 @@ import { parseConfig } from "./config.js";
 import { Service } from "./core/service.js";
 import { JiraCloud } from "./jira/cloud.js";
 import { HttpClient } from "./http.js";
+import { metrics } from "./metrics.js";
 import { ChangeRuntime } from "./state/runtime.js";
 import { registerChanges } from "./tools/changes.js";
 
@@ -24,6 +25,10 @@ export default Plugin.define({
       provider.close();
       throw error;
     }
-    return async () => { await changes.close(); service.close(); };
+    return async () => {
+      await changes.close();
+      service.close();
+      console.error(JSON.stringify({ event: "issuekeeper.metrics", metrics: metrics.snapshot() }));
+    };
   },
 });
