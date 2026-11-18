@@ -26,6 +26,7 @@
     "LICENSE",
     "CHANGELOG.md",
     "SECURITY.md",
+    "COMPATIBILITY.md",
     "options.schema.json",
     "opencode.example.jsonc"
   ],

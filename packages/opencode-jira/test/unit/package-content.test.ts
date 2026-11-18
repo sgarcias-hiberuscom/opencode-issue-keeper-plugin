@@ -22,7 +22,7 @@ describe("[8.4][T13] distributed package content", () => {
       /^dist\/[\w/.-]+\.js$/,
       /^dist\/[\w/.-]+\.d\.ts$/,
       /^templates\/[\w./-]+$/,
-      "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "options.schema.json", "opencode.example.jsonc", "package.json",
+      "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "COMPATIBILITY.md", "options.schema.json", "opencode.example.jsonc", "package.json",
     ];
     const extras = paths.filter((path) => !allowed.some((pattern) => typeof pattern === "string" ? pattern === path : pattern.test(path)));
     expect(extras).toEqual([]);
@@ -30,7 +30,7 @@ describe("[8.4][T13] distributed package content", () => {
     expect(paths).toHaveLength(packed.entryCount);
   });
   it("includes the CLI, templates, schema and the distributed documentation", () => {
-    for (const required of ["dist/index.js", "dist/cli.js", "templates/jira.md", "templates/account.example.jsonc", "templates/commands/jira-get.md", "templates/commands/jira-list.md", "templates/commands/jira-update.md", "options.schema.json", "opencode.example.jsonc", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "package.json"]) {
+    for (const required of ["dist/index.js", "dist/cli.js", "templates/jira.md", "templates/account.example.jsonc", "templates/commands/jira-get.md", "templates/commands/jira-list.md", "templates/commands/jira-update.md", "options.schema.json", "opencode.example.jsonc", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "COMPATIBILITY.md", "package.json"]) {
       expect(paths, required).toContain(required);
     }
     expect(packed.name).toBe("@issuekeeper/opencode-jira");
