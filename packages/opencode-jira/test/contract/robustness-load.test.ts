@@ -42,8 +42,10 @@ function searchResponse(account: { id: string }) {
 function controlled(c: Config) {
   const inflight = { total: 0, maxTotal: 0, byAccount: new Map<string, number>(), maxByAccount: new Map<string, number>(), bySite: new Map<string, number>(), maxBySite: new Map<string, number>() };
   const waiting: Array<() => void> = [];
+  const started: number[] = [];
   const fetcher = mockFetch(async (url, init) => {
     const account = accountOf(c, url, init);
+    started.push((JSON.parse(String(init.body)) as { maxResults: number }).maxResults);
     const bump = (map: Map<string, number>, max: Map<string, number>, key: string, delta: number) => {
       const value = (map.get(key) ?? 0) + delta;
       map.set(key, value);
@@ -72,7 +74,7 @@ function controlled(c: Config) {
     }
     return done;
   }
-  return { fetcher, inflight, drain, waiting };
+  return { fetcher, inflight, drain, waiting, started };
 }
 
 describe("[10.2] read concurrency and load", () => {
@@ -164,17 +166,22 @@ describe("[10.2] read concurrency and load", () => {
     try {
       const h = await toolHarness(service);
       const controllers = Array.from({ length: 10 }, () => new AbortController());
-      const calls = controllers.map((controller) => h.invoke("issues_search", { account: "work", jql: "project = IK" }, controller.signal));
+      const calls = controllers.map((controller, index) => h.invoke("issues_search", { account: "work", jql: "project = IK", maxResults: index + 1 }, controller.signal));
       const settled = calls.map((call) => call.then((value) => ({ value }), (error: unknown) => ({ error })));
-      await tick(); await tick();
+      while (gate.inflight.total < c.http.maxConcurrentPerAccount) await tick();
+      for (let i = 0; i < 20; i++) await tick();
       expect(gate.inflight.total).toBe(c.http.maxConcurrentPerAccount);
+      const started = new Set(gate.started);
+      expect(started.size).toBe(c.http.maxConcurrentPerAccount);
       const reason = new Error("caller cancelled");
-      const aborted = [3, 4, 5, 6, 7];
+      const queued = controllers.map((_, index) => index).filter((index) => !started.has(index + 1));
+      const aborted = queued.slice(0, 5);
+      const survivors = controllers.map((_, index) => index).filter((index) => !aborted.includes(index));
       for (const index of aborted) controllers[index]!.abort(reason);
       const outcomes = await gate.drain(Promise.all(settled));
       for (const index of aborted) expect(outcomes[index]).toEqual({ error: reason });
-      for (const index of [0, 1, 2, 8, 9]) expect(outcomes[index]).toMatchObject({ value: { ok: true } });
-      expect(gate.fetcher).toHaveBeenCalledTimes(5);
+      for (const index of survivors) expect(outcomes[index]).toMatchObject({ value: { ok: true } });
+      expect(gate.fetcher).toHaveBeenCalledTimes(survivors.length);
       expect(gate.inflight.total).toBe(0);
     } finally { service.close(); }
   });

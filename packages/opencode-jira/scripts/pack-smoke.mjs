@@ -28,6 +28,20 @@ try {
   const files = packed.files.map((file) => file.path);
   for (const required of ["dist/index.js", "dist/cli.js", "dist/uploads.js", "dist/state/staging.js", "dist/state/store.js", "dist/state/coordinator.js", "dist/state/application.js", "dist/state/runtime.js", "dist/state/multipart.js", "dist/state/review.js", "dist/state/operator.js", "dist/core/markdown.js", "dist/core/comment.js", "dist/core/adf-document.js", "dist/jira/mutations.js", "dist/jira/changes.js", "dist/jira/preparation.js", "dist/jira/attachment-links.js", "dist/tools/changes.js", "dist/tools/shared.js", "dist/tools/change-schemas.js", "options.schema.json", "templates/jira.md", "templates/account.example.jsonc", "templates/commands/jira-get.md", "templates/commands/jira-list.md", "templates/commands/jira-update.md"]) assert(files.includes(required));
   assert(files.every((file) => /^(?:dist\/|templates\/|README\.md$|options\.schema\.json$|opencode\.example\.jsonc$|package\.json$)/.test(file)));
+  const scanned = join(directory, "tarball-scan");
+  await mkdir(scanned);
+  const entries = execFileSync("tar", ["-tzf", join(directory, packed.filename)], { encoding: "utf8", timeout: 10000 }).split("\n").filter(Boolean);
+  assert(entries.length > 0);
+  execFileSync("tar", ["-xzf", join(directory, packed.filename), "-C", scanned], { timeout: 10000 });
+  const forbiddenPath = /(token|secret|\.sqlite|\.env|reports\/|validation\/|\.issuekeeper)/i;
+  const forbiddenContent = ["ATATT", "-----BEGIN", "Authorization: Basic", "X-Amz-Signature"];
+  for (const entry of entries) {
+    assert(!forbiddenPath.test(entry), `Ruta no permitida en el paquete: ${entry}`);
+    if (entry.endsWith("/")) continue;
+    const content = await readFile(join(scanned, entry), "latin1");
+    for (const marker of forbiddenContent) assert(!content.includes(marker), `Contenido no permitido en ${entry}`);
+  }
+  await rm(scanned, { recursive: true, force: true });
   await writeFile(join(directory, "package.json"), JSON.stringify({ private: true, type: "module" }));
   const archive = join(directory, packed.filename);
   execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", archive], { cwd: directory, stdio: "pipe", env: npmEnv, timeout: 90000 });
@@ -88,7 +102,10 @@ try {
     assert(!state.directory.startsWith(copy));
     assert(existsSync(state.database));
     const { ChangeStore: CopiedStore } = await import(pathToFileURL(join(copy, "dist/state/store.js")).href);
-    const store = new ChangeStore(paths.data, { now: () => new Date("2026-11-17T10:00:00Z") });
+    const stamp = new Date();
+    const created = stamp.toISOString();
+    const expires = new Date(stamp.getTime() + 600000).toISOString();
+    const store = new ChangeStore(paths.data, { now: () => stamp });
     assert.throws(() => new CopiedStore(paths.data), /Otra operación/);
     const { stageUploadFiles } = await import(pathToFileURL(join(copy, "dist/state/staging.js")).href);
     const location = join(directory, "project");
@@ -107,8 +124,8 @@ try {
     const plan = {
       version: 1, id: "pack-proposal", sessionID: "pack-session", locationID: "a".repeat(64), account: "qa", site: "https://synthetic.invalid",
       credentialIdentity: "synthetic-person", issueId: "1", issueKey: "SYN-1", projectKey: "SYN", kind: "upload", audience: "ticket", files: staged,
-      steps: [{ id: "step-1", kind: "mutation", fileRefs: [staged[0].stagedRef] }], expectedUpdated: "2026-11-17T10:00:00Z", policyFingerprint: "b".repeat(64),
-      payload: {}, summary: "Synthetic pack check", createdAt: "2026-11-17T10:00:00Z", expiresAt: "2026-11-17T10:10:00Z",
+      steps: [{ id: "step-1", kind: "mutation", fileRefs: [staged[0].stagedRef] }], expectedUpdated: created, policyFingerprint: "b".repeat(64),
+      payload: {}, summary: "Synthetic pack check", createdAt: created, expiresAt: expires,
     };
     const saved = store.prepare(plan); store.close();
     const status = execFileSync(process.execPath, [join(copy, "dist/cli.js"), "status", "--global", "--proposal", plan.id], { env, cwd: directory, encoding: "utf8", timeout: 10000 });
