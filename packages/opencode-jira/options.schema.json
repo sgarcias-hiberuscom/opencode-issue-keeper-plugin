@@ -204,7 +204,8 @@
         },
         "requireExpectedUpdated": {
           "default": true,
-          "type": "boolean"
+          "type": "boolean",
+          "description": "La fase 2 exige fecha real y frescura incluso si esta opción es false; no habilita escrituras sin expectedUpdated."
         }
       },
       "additionalProperties": false

@@ -3,7 +3,9 @@ export type ErrorCode =
   | "NOT_FOUND_OR_NO_ACCESS" | "VALIDATION_FAILED" | "CONFLICT" | "RATE_LIMITED"
   | "TIMEOUT" | "NETWORK_ERROR" | "REDIRECT_NOT_ALLOWED" | "RESPONSE_TOO_LARGE"
   | "INVALID_RESPONSE" | "CAPABILITY_NOT_SUPPORTED" | "FILE_ACCESS_DENIED"
-  | "ATTACHMENT_TOO_LARGE" | "TRANSFER_INCOMPLETE" | "CURSOR_INVALID";
+  | "ATTACHMENT_TOO_LARGE" | "TRANSFER_INCOMPLETE" | "PARTIAL_UPLOAD" | "CURSOR_INVALID" | "FORMAT_INVALID" | "FORMAT_NOT_SUPPORTED"
+  | "MENTION_UNRESOLVED" | "MENTION_AMBIGUOUS" | "MENTION_NOT_ALLOWED" | "MENTION_NOT_SUPPORTED"
+  | "WRITE_OUTCOME_UNKNOWN" | "PROPOSAL_EXPIRED" | "PROPOSAL_INVALID" | "FILE_CHANGED";
 
 export class IssueKeeperError extends Error {
   constructor(
@@ -29,12 +31,13 @@ export function cancellation(signal: AbortSignal): void {
 export { IssueKeeperError as ApplicationError };
 
 export function validationFailure(issues: readonly { path: PropertyKey[]; code: string }[]): IssueKeeperError {
-  const known = new Set(["account", "issueKey", "fields", "jql", "maxResults", "cursor", "audience", "visibility", "type", "value", "query", "accountId", "attachmentId", "destinationName"]);
+  const known = new Set(["account", "issueKey", "fields", "jql", "maxResults", "cursor", "audience", "visibility", "type", "value", "query", "accountId", "attachmentId", "destinationName", "format"]);
   const fieldErrors = Object.fromEntries(issues.map((issue) => [
     issue.path.every((part) => typeof part === "number" || known.has(String(part))) ? issue.path.join(".") || "input" : "input",
     "Valor no válido; consulte el esquema.",
   ]));
-  return new IssueKeeperError("VALIDATION_FAILED", "Argumentos no válidos; consulte el esquema de la herramienta.", false, undefined, fieldErrors);
+  const format = issues.some((issue) => issue.path.length === 1 && (issue.path[0] === "format" || ["text", "comment"].includes(String(issue.path[0])) && issue.code === "too_big"));
+  return new IssueKeeperError(format ? "FORMAT_INVALID" : "VALIDATION_FAILED", format ? "Formato no válido o contenido excesivo; corrija la entrada sin reinterpretarla automáticamente como plain." : "Argumentos no válidos; consulte el esquema de la herramienta.", false, undefined, fieldErrors);
 }
 
 export function applicationFailure(error: IssueKeeperError, requestId: string, account?: string, warnings: string[] = []) {

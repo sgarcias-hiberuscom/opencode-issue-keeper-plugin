@@ -3,7 +3,7 @@ import type { Attachments, Comments, Get, Search, Mentions } from "./inputs.js";
 import type { Attachment, CandidatePage, Comment, DownloadReceipt, Page, ReadResult, Ticket, User } from "./ticket.js";
 
 export interface TicketProvider {
-  readonly capabilities: { search: boolean; adf: boolean; serviceManagement: boolean; download: boolean; mentionCandidates: boolean; remoteWrites: false };
+  readonly capabilities: { search: boolean; adf: boolean; serviceManagement: boolean; download: boolean; mentionCandidates: boolean; remoteWrites: boolean };
   tenant?(account: Account, signal: AbortSignal): Promise<void>;
   serviceManagementStatus?(account: Account, signal: AbortSignal): Promise<"reachable" | "denied" | "not-tested">;
   identity(account: Account, signal: AbortSignal): Promise<User>;

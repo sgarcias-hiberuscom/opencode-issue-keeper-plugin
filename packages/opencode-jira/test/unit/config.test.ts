@@ -52,7 +52,8 @@ describe("configuration", () => {
   it("preserves scoped gateway prefix and separates the web origin", () => {
     const c = parseConfig({ accounts: [{ ...rawAccount(), auth: { ...rawAccount().auth, mode: "cloud-scoped-token", cloudId: "11111111-2222-4333-8444-555555555555" } }] });
     expect(apiUrl(c.accounts[0]!, "rest/servicedeskapi/request/IK-1/comment").href).toBe("https://api.atlassian.com/ex/jira/11111111-2222-4333-8444-555555555555/rest/servicedeskapi/request/IK-1/comment");
-    for (const path of ["https://evil.com", "/rest/api/3/myself", "rest/api/3/issue/../myself", "rest/api/3/search", "rest/api/3/issue/IK-1/transitions"]) expect(() => apiUrl(c.accounts[0]!, path)).toThrow();
+    expect(apiUrl(c.accounts[0]!, "rest/api/3/issue/IK-1/transitions").pathname).toBe("/ex/jira/11111111-2222-4333-8444-555555555555/rest/api/3/issue/IK-1/transitions");
+    for (const path of ["https://evil.com", "/rest/api/3/myself", "rest/api/3/issue/../myself", "rest/api/3/search", "rest/api/3/issue/IK-1/delete", "rest/api/3/issue/IK-1/transitions/../comment"]) expect(() => apiUrl(c.accounts[0]!, path)).toThrow();
   });
   it("restricts download destination to the location, outside metadata", () => {
     const c = parseConfig({ accounts: [rawAccount()] });

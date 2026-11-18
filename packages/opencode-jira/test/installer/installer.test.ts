@@ -7,6 +7,16 @@ import { atomicWrite, hash } from "../../src/installer/files.js";
 import { parseDocument } from "../../src/installer/jsonc.js";
 import { parseArguments } from "../../src/cli.js";
 import { baseOptions } from "../../src/defaults.js";
+import { createRequire } from "node:module";
+import { ChangeStore } from "../../src/state/store.js";
+import { withChangeStore } from "../../src/state/coordinator.js";
+import { statePaths } from "../../src/state/paths.js";
+import { planFixture, instant } from "../state-fixtures.js";
+import Database from "better-sqlite3";
+import { fork } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
+import { m3Fixture } from "../m3-fixtures.js";
 
 let home: string;
 let paths: InstallerPaths;
@@ -23,19 +33,29 @@ beforeEach(async () => {
   await writeFile(join(installed, "package.json"), JSON.stringify(own));
   await writeFile(join(installed, "dist/index.js"), "export default {};");
   await writeFile(join(installed, "dist/cli.js"), "#!/usr/bin/env node\n");
+  await writeFile(join(installed, "dist/uploads.js"), "export {};");
+  for (const name of ["core/proposals", "core/review", "core/markdown", "core/comment", "core/adf-document", "core/metadata", "core/change-policy", "state/store", "state/coordinator", "state/files", "state/paths", "state/errors", "state/application", "state/runtime", "state/staging", "state/multipart", "state/review", "state/operator", "jira/changes", "jira/mutations", "jira/audience", "jira/preparation", "jira/attachment-links", "tools/changes", "tools/shared", "tools/change-schemas", "tools/change-permissions"]) {
+    await mkdir(join(installed, "dist", name.split("/")[0]!), { recursive: true });
+    await writeFile(join(installed, "dist", `${name}.js`), "export {};");
+  }
   await writeFile(join(installed, "options.schema.json"), "{}");
+  for (const name of ["README.md", "opencode.example.jsonc"]) await cp(new URL(`../../${name}`, import.meta.url), join(installed, name));
   await cp(new URL("../../templates/", import.meta.url), join(installed, "templates"), { recursive: true });
   const release = join(paths.data, "copies", "a".repeat(64));
   const lock: { packages: Record<string, { version: string }> } = { packages: {} };
   lock.packages["node_modules/@issuekeeper/opencode-jira"] = { version: own.version };
-  for (const dependency of ["@opencode/plugin", "zod", "jsonc-parser"]) {
+  for (const dependency of Object.keys(own.dependencies)) {
     await mkdir(join(release, "node_modules", dependency), { recursive: true });
     const version = own.dependencies[dependency];
     lock.packages[`node_modules/${dependency}`] = { version };
     await writeFile(join(release, "node_modules", dependency, "package.json"), JSON.stringify({ name: dependency, version }));
+    if (dependency === "better-sqlite3") {
+      const actual = createRequire(import.meta.url).resolve("better-sqlite3");
+      await writeFile(join(release, "node_modules", dependency, "index.js"), `module.exports = require(${JSON.stringify(actual)});`);
+    }
   }
   await writeFile(join(release, "package-lock.json"), JSON.stringify(lock));
-  prepare = vi.fn(async () => ({ installed, version: "0.1.0" }));
+  prepare = vi.fn(async () => ({ installed, version: own.version }));
 });
 afterEach(async () => { await rm(home, { recursive: true, force: true }); vi.restoreAllMocks(); });
 const configPath = () => join(paths.config, "opencode.jsonc");
@@ -44,6 +64,23 @@ async function writeConfig(text: string, name = "opencode.jsonc") {
   await writeFile(join(paths.config, name), text);
 }
 async function runInstall() { return install("local", io, { paths, prepare }); }
+async function candidate(version = "0.3.0") {
+  const original = await prepare("local", paths.data);
+  const release = join(paths.data, "copies", "b".repeat(64));
+  await cp(original.installed.slice(0, -"/node_modules/@issuekeeper/opencode-jira".length), release, { recursive: true });
+  const installed = join(release, "node_modules/@issuekeeper/opencode-jira");
+  const metadata = JSON.parse(await readFile(join(installed, "package.json"), "utf8"));
+  await writeFile(join(installed, "package.json"), JSON.stringify({ ...metadata, version }));
+  const lock = JSON.parse(await readFile(join(release, "package-lock.json"), "utf8"));
+  lock.packages["node_modules/@issuekeeper/opencode-jira"].version = version;
+  await writeFile(join(release, "package-lock.json"), JSON.stringify(lock));
+  prepare.mockResolvedValue({ installed, version });
+  return { installed, version };
+}
+async function snapshots() {
+  const store = new ChangeStore(paths.data, { mode: "maintenance" });
+  try { return { change: store.get("proposal-1"), events: store.events("proposal-1") }; } finally { store.close(); }
+}
 
 describe("[6.9][E00][IN-02] isolated global installer", () => {
   it("installs the exact empty base, keeps a private manifest and is idempotent", async () => {
@@ -223,5 +260,195 @@ describe("[6.9][E00][IN-01] CLI arguments and filesystem primitives", () => {
   it("resolves HOME/XDG independent of cwd", () => {
     expect(paths.config).toBe(join(home, "config with spaces/opencode"));
     expect(() => installerPaths({ HOME: home, XDG_CONFIG_HOME: "../relative" })).toThrow();
+    expect(() => installerPaths({ HOME: home, XDG_DATA_HOME: "../relative" })).toThrow();
   });
+});
+
+describe("[INS-01–INS-03][D-13][RC-10] shared maintenance ownership", () => {
+  it("initializes a private global database and preserves prepared plans across reinstall and removal", async () => {
+    await runInstall();
+    const runtime = statePaths(paths.data);
+    expect((await stat(runtime.directory)).mode & 0o777).toBe(0o700);
+    expect((await stat(runtime.database)).mode & 0o777).toBe(0o600);
+    const store = new ChangeStore(paths.data, { now: () => new Date(instant) });
+    const prepared = store.prepare(planFixture()); store.close();
+    await runInstall();
+    await uninstall(io, paths);
+    const reopened = new ChangeStore(paths.data);
+    try { expect(reopened.get(prepared.plan.id)).toEqual(prepared); } finally { reopened.close(); }
+  });
+  it("blocks installer admission while a runtime callback owns the store, including during approval", async () => {
+    await runInstall();
+    await withChangeStore(async () => {
+      const before = await readFile(configPath(), "utf8");
+      await expect(runInstall()).rejects.toMatchObject({ reason: "BUSY" });
+      await expect(uninstall(io, paths)).rejects.toMatchObject({ reason: "BUSY" });
+      expect(await readFile(configPath(), "utf8")).toBe(before);
+    }, { data: paths.data });
+  });
+  it("retains maintenance ownership across user confirmation, so a new runtime cannot race the change", async () => {
+    io.accept = async () => {
+      expect(() => new ChangeStore(paths.data)).toThrow();
+      return true;
+    };
+    await runInstall();
+    expect(await check(io, paths)).toBe(0);
+  });
+  it("blocks replacement/removal after a crash with a possibly sent operation", async () => {
+    await runInstall();
+    const store = new ChangeStore(paths.data, { now: () => new Date(instant) });
+    store.prepare(planFixture()); store.claim("proposal-1", 0); store.sending("proposal-1", 1, "step-1"); store.close();
+    const before = await readFile(configPath(), "utf8");
+    await expect(runInstall()).rejects.toMatchObject({ reason: "BUSY" });
+    await expect(uninstall(io, paths)).rejects.toMatchObject({ reason: "BUSY" });
+    expect(await readFile(configPath(), "utf8")).toBe(before);
+    expect(await check(io, paths)).toBe(0);
+    const inspect = new ChangeStore(paths.data, { mode: "maintenance" });
+    try { expect(inspect.get("proposal-1").execution.steps[0]!.state).toBe("sending"); } finally { inspect.close(); }
+  });
+  it("does not replace corrupt state or treat an incompatible schema as an empty installation", async () => {
+    await runInstall();
+    const runtime = statePaths(paths.data);
+    await writeFile(runtime.database, "corrupt-state");
+    await expect(runInstall()).rejects.toMatchObject({ reason: "CORRUPT" });
+    expect(await readFile(runtime.database, "utf8")).toBe("corrupt-state");
+  });
+  it.each(["database", "plan"])("blocks a candidate with incompatible %s metadata before changing managed files", async (format) => {
+    await runInstall(); const before = await readFile(configPath(), "utf8");
+    const next = await candidate(); const path = join(next.installed, "package.json");
+    const metadata = JSON.parse(await readFile(path, "utf8")); metadata.issuekeeperState[format]++;
+    await writeFile(path, JSON.stringify(metadata));
+    await expect(runInstall()).rejects.toThrow("incompatible");
+    expect(await readFile(configPath(), "utf8")).toBe(before);
+    expect(await check(io, paths)).toBe(0);
+  });
+  it.each(["dist/jira/preparation.js", "dist/core/comment.js", "templates/commands/jira-update.md"])("rejects a candidate missing %s", async (file) => {
+    await runInstall(); const before = await readFile(configPath(), "utf8");
+    const next = await candidate(); await rm(join(next.installed, file));
+    await expect(runInstall()).rejects.toThrow("incompleto");
+    expect(await readFile(configPath(), "utf8")).toBe(before);
+  });
+  it.each(["schema", "plan"])("refuses unsupported persisted %s without changing or migrating bytes", async (format) => {
+    await runInstall();
+    const store = new ChangeStore(paths.data, { now: () => new Date(instant) }); store.prepare(planFixture()); store.close();
+    const db = new Database(statePaths(paths.data).database);
+    if (format === "schema") db.pragma("user_version=2");
+    else db.prepare("UPDATE plans SET document=? WHERE id=?").run(JSON.stringify({ ...planFixture(), version: 2 }), "proposal-1");
+    db.close();
+    const before = await readFile(statePaths(paths.data).database); const config = await readFile(configPath(), "utf8");
+    await expect(runInstall()).rejects.toMatchObject({ reason: "INCOMPATIBLE" });
+    await expect(uninstall(io, paths)).rejects.toMatchObject({ reason: "INCOMPATIBLE" });
+    expect(await readFile(statePaths(paths.data).database)).toEqual(before);
+    expect(await readFile(configPath(), "utf8")).toBe(config);
+  });
+  it.each(["prepared", "applied", "rejected", "partial", "unknown"])("preserves %s plans, receipts, hashes and audit while allowing only safe maintenance", async (state) => {
+    await runInstall(); const store = new ChangeStore(paths.data, { now: () => new Date(instant) });
+    const plan = planFixture({ steps: state === "partial" ? [{ id: "step-1", kind: "mutation", fileRefs: [] }, { id: "step-2", kind: "mutation", fileRefs: [] }] : planFixture().steps });
+    store.prepare(plan);
+    if (state !== "prepared") {
+      store.claim(plan.id, 0); store.sending(plan.id, 1, "step-1");
+      if (state === "unknown" || state === "rejected") store.stop(plan.id, 2, "step-1", state === "unknown" ? "unknown" : "failed", undefined, state === "rejected" ? 400 : undefined);
+      else {
+        store.confirm(plan.id, 2, "step-1", { remoteIds: ["remote:1"], temporaryAttachmentIds: [], confirmedAt: instant });
+        store.verified(plan.id, 3, "step-1");
+        if (state === "partial") store.stop(plan.id, 4, undefined, "failed");
+      }
+    }
+    store.close(); const before = await snapshots(); await candidate();
+    if (["partial", "unknown"].includes(state)) {
+      await expect(runInstall()).rejects.toMatchObject({ reason: "BUSY" });
+      await expect(uninstall(io, paths)).rejects.toMatchObject({ reason: "BUSY" });
+    } else { await runInstall(); await uninstall(io, paths); }
+    expect(await snapshots()).toEqual(before);
+  });
+  it("keeps customized instructions, account options and concurrent JSONC edits during an upgrade", async () => {
+    await runInstall(); await writeFile(paths.instructions, "custom instructions");
+    const config = parseDocument(await readFile(configPath(), "utf8")) as any;
+    config.plugins[0].options.accounts = [{ id: "qa", siteUrl: "https://synthetic.atlassian.net", auth: { mode: "cloud-token", email: "synthetic@example.invalid", tokenEnv: "SYNTHETIC_TOKEN" } }];
+    await writeConfig(JSON.stringify(config)); const before = await readFile(configPath(), "utf8"); await candidate();
+    io.accept = async () => { await writeConfig(`${before}\n// concurrent edit\n`); return true; };
+    await expect(runInstall()).rejects.toThrow("concurrente");
+    expect(await readFile(configPath(), "utf8")).toBe(`${before}\n// concurrent edit\n`);
+    io.accept = async () => true; await runInstall();
+    expect((parseDocument(await readFile(configPath(), "utf8")) as any).plugins[0].options.accounts).toEqual(config.plugins[0].options.accounts);
+    expect(await readFile(paths.instructions, "utf8")).toBe("custom instructions"); expect(await check(io, paths)).toBe(0);
+  });
+  it.each(["removing", "prepared", "configured", "instructions"] as const)("resumes account-preserving removal after interruption at %s", async (checkpoint) => {
+    await runInstall(); const config = parseDocument(await readFile(configPath(), "utf8")) as any;
+    config.plugins[0].options.accounts = [{ id: "qa", siteUrl: "https://synthetic.atlassian.net", auth: { mode: "cloud-token", email: "synthetic@example.invalid", tokenEnv: "SYNTHETIC_TOKEN" } }];
+    await writeConfig(JSON.stringify(config));
+    await expect(uninstall(io, paths, { afterStep: async (step) => { if (step === checkpoint) throw new Error("interruption"); } })).rejects.toThrow("interruption");
+    expect(await check(io, paths)).toBe(1); await expect(runInstall()).rejects.toThrow("Retirada interrumpida");
+    await uninstall(io, paths); const exported = join(paths.data, "preserved-options.json");
+    expect(JSON.parse(await readFile(exported, "utf8")).options.accounts).toEqual(config.plugins[0].options.accounts);
+    expect((await stat(exported)).mode & 0o777).toBe(0o600);
+    expect(parseDocument(await readFile(configPath(), "utf8")).plugins).toEqual([]);
+  });
+  it.each([
+    ["install", "prepared"], ["install", "instructions"], ["install", "configured"],
+    ["uninstall", "removing"], ["uninstall", "prepared"], ["uninstall", "configured"], ["uninstall", "instructions"],
+  ])("recovers %s after SIGKILL at %s with the approved plan intact", async (action, checkpoint) => {
+    await runInstall();
+    const config = parseDocument(await readFile(configPath(), "utf8")) as any;
+    config.plugins[0].options.accounts = [{ id: "qa", siteUrl: "https://synthetic.atlassian.net", auth: { mode: "cloud-token", email: "synthetic@example.invalid", tokenEnv: "SYNTHETIC_TOKEN" } }];
+    await writeConfig(JSON.stringify(config));
+    const store = new ChangeStore(paths.data, { now: () => new Date(instant) }); store.prepare(planFixture()); store.close();
+    const before = await snapshots(); const next = await candidate();
+    const template = `${await readFile(join(next.installed, "templates/jira.md"), "utf8")}\nVersioned synthetic instructions.\n`;
+    await writeFile(join(next.installed, "templates/jira.md"), template);
+    const child = fork(fileURLToPath(new URL("../fixtures/installer-worker.mjs", import.meta.url)), [home, checkpoint, next.installed, next.version, action], {
+      execArgv: ["--experimental-transform-types", "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))],
+      env: {}, stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    try {
+      const reached = new Promise((resolve, reject) => {
+        let stderr = ""; child.stderr!.on("data", (value) => { stderr += String(value); });
+        child.once("error", reject); child.once("exit", () => reject(new Error(`Worker exited before checkpoint: ${stderr}`))); child.once("message", resolve);
+      });
+      expect(await reached).toEqual({ checkpoint });
+      const exited = once(child, "exit"); child.kill("SIGKILL"); await exited;
+      expect(await check(io, paths)).toBe(1);
+      if (action === "install") {
+        await runInstall(); expect(await check(io, paths)).toBe(0);
+        expect((parseDocument(await readFile(configPath(), "utf8")) as any).plugins[0].package).toBe(next.installed);
+        expect(await readFile(paths.instructions, "utf8")).toBe(template);
+      } else {
+        await uninstall(io, paths);
+        expect(parseDocument(await readFile(configPath(), "utf8")).plugins).toEqual([]);
+        expect(JSON.parse(await readFile(join(paths.data, "preserved-options.json"), "utf8")).options.accounts).toEqual(config.plugins[0].options.accounts);
+      }
+      expect(await snapshots()).toEqual(before);
+    } finally { if (child.exitCode === null && child.signalCode === null) { const exited = once(child, "exit"); child.kill("SIGKILL"); await exited; } }
+  }, 20000);
+  it.each(["approval", "sending", "cleanup"])("blocks replacement and removal during the integrated engine's %s window", async (window) => {
+    await runInstall(); vi.stubEnv("IK_TEST_WORK", "synthetic-token");
+    const f = await m3Fixture(false, paths.data);
+    let release!: () => void; const wait = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void; const ready = new Promise<void>((resolve) => { entered = resolve; });
+    let task: Promise<unknown> | undefined;
+    try {
+      const plan = await f.prepare("comment_prepare", { audience: "ticket", text: "synthetic maintenance" });
+      const before = await readFile(configPath(), "utf8");
+      if (window === "approval") f.harness.assert.mockImplementation(async (request: unknown) => { if ((request as { action: string }).action === "jira.write") { entered(); await wait; } });
+      else {
+        const original = f.fetcher.getMockImplementation()!;
+        f.fetcher.mockImplementation(async (url, init) => { if (init?.method === "POST") { entered(); await wait; } return original(url, init); });
+      }
+      task = f.harness.invoke("change_apply", { proposalId: plan.id });
+      const settled = task.then(() => undefined, () => undefined);
+      await ready;
+      const closing = window === "cleanup" ? f.harness.close() : undefined;
+      await expect(runInstall()).rejects.toMatchObject({ reason: "BUSY" });
+      await expect(uninstall(io, paths)).rejects.toMatchObject({ reason: "BUSY" });
+      expect(await readFile(configPath(), "utf8")).toBe(before);
+      release(); await settled; await closing;
+      if (window === "cleanup") {
+        const saved = await f.saved(plan); expect(saved.execution.state).toBe("unknown");
+        await expect(runInstall()).rejects.toMatchObject({ reason: "BUSY" });
+      } else {
+        expect((await f.saved(plan)).execution.state).toBe("applied");
+        expect(f.ledger).toHaveLength(1); await runInstall();
+      }
+    } finally { release(); await task?.catch(() => {}); await f.close(); await rm(f.root, { recursive: true, force: true }); vi.unstubAllEnvs(); }
+  }, 20000);
 });

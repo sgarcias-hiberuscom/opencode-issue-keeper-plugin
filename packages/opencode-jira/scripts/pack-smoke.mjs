@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const variant = process.argv[2];
 if (variant === undefined) {
   const results = await Promise.all(["tarball", "local"].map((source) => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), source], { stdio: "inherit", timeout: 100000 });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), source], { stdio: "inherit", timeout: 240000 });
     child.once("error", reject);
     child.once("close", (code, signal) => resolve({ source, code, signal }));
   })));
   for (const result of results) assert.equal(result.code, 0, `Smoke ${result.source} incompleto (${result.signal ?? result.code}).`);
-  console.log("Tarball aislado: ocho herramientas, base sin cuentas, CLI local/tgz, check y retirada comprobados.");
+  console.log("Entrega aislada: quince herramientas, CLI local/tgz, actualización compatible, apply protegido/deduplicado y conservación tras retirada comprobados.");
   process.exit(0);
 }
 assert(["tarball", "local"].includes(variant), "Variante de empaquetado desconocida.");
@@ -26,11 +26,11 @@ try {
   const result = JSON.parse(execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", directory], { encoding: "utf8", env: npmEnv, timeout: 20000 }));
   const packed = Array.isArray(result) ? result[0] : Object.values(result)[0];
   const files = packed.files.map((file) => file.path);
-  for (const required of ["dist/index.js", "dist/cli.js", "options.schema.json", "templates/jira.md", "templates/account.example.jsonc"]) assert(files.includes(required));
-  assert(!files.some((file) => file.startsWith("test/") || file.startsWith("reports/") || /\.token$|\.tgz$|\.issuekeeper\//.test(file)));
+  for (const required of ["dist/index.js", "dist/cli.js", "dist/uploads.js", "dist/state/staging.js", "dist/state/store.js", "dist/state/coordinator.js", "dist/state/application.js", "dist/state/runtime.js", "dist/state/multipart.js", "dist/state/review.js", "dist/state/operator.js", "dist/core/markdown.js", "dist/core/comment.js", "dist/core/adf-document.js", "dist/jira/mutations.js", "dist/jira/changes.js", "dist/jira/preparation.js", "dist/jira/attachment-links.js", "dist/tools/changes.js", "dist/tools/shared.js", "dist/tools/change-schemas.js", "options.schema.json", "templates/jira.md", "templates/account.example.jsonc", "templates/commands/jira-get.md", "templates/commands/jira-list.md", "templates/commands/jira-update.md"]) assert(files.includes(required));
+  assert(files.every((file) => /^(?:dist\/|templates\/|README\.md$|options\.schema\.json$|opencode\.example\.jsonc$|package\.json$)/.test(file)));
   await writeFile(join(directory, "package.json"), JSON.stringify({ private: true, type: "module" }));
   const archive = join(directory, packed.filename);
-  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", archive], { cwd: directory, stdio: "pipe", env: npmEnv, timeout: 30000 });
+  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", archive], { cwd: directory, stdio: "pipe", env: npmEnv, timeout: 90000 });
   const installed = join(directory, "node_modules/@issuekeeper/opencode-jira");
   const manifest = JSON.parse(await readFile(join(installed, "package.json"), "utf8"));
   assert(!manifest.scripts.postinstall && !manifest.scripts.install);
@@ -52,13 +52,25 @@ try {
     permission: { assert: async () => { throw new Error("No execution expected during plugin setup"); } },
   });
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [
-    "accounts_list", "attachment_download", "attachments_list", "comments_list", "connection_test", "issue_get", "issues_search", "mention_candidates",
+    "accounts_list", "attachment_download", "attachment_upload_prepare", "attachments_list", "change_apply", "comment_prepare", "comments_list", "connection_test", "issue_edit_metadata", "issue_get", "issue_update_prepare", "issues_search", "mention_candidates", "transition_prepare", "transitions_list",
   ]);
-  assert(!tools.some((tool) => /prepare|apply|upload|transition/.test(tool.name)));
+  assert(!tools.some((tool) => /^(?:http|upload|request|reconcile)$/.test(tool.name)));
   await cleanup?.();
   const { install, check, uninstall } = await import(pathToFileURL(join(installed, "dist/installer/index.js")).href);
   const { installerPaths } = await import(pathToFileURL(join(installed, "dist/installer/paths.js")).href);
+  const { ChangeStore } = await import(pathToFileURL(join(installed, "dist/state/store.js")).href);
+  const { statePaths } = await import(pathToFileURL(join(installed, "dist/state/paths.js")).href);
+  const { parseMarkdown } = await import(pathToFileURL(join(installed, "dist/core/markdown.js")).href);
+  const markdown = "😀\r\n\r\n| A | B |\r\n| --- | --- |\r\n| uno | dos |";
+  const parsedMarkdown = parseMarkdown(markdown);
+  assert.equal(parsedMarkdown.source, markdown); assert(parsedMarkdown.ast.children.some((node) => node.type === "table"));
+  const { publication } = await import(pathToFileURL(join(installed, "dist/core/comment.js")).href);
+  const converted = publication("Hola **Ana**", "markdown", [{ start: 7, end: 10, accountId: "synthetic-person", displayName: "Ana" }], "jsm");
+  assert(converted.wiki.includes("[~accountid:synthetic-person]"));
+  assert(JSON.stringify(converted.adf).includes('"type":"mention"'));
   const io = { accept: async () => true, print() {} };
+  const functional = join(directory, "functional-smoke.mjs");
+  await copyFile(new URL("./package-functional-smoke.mjs", import.meta.url), functional);
   globalThis.fetch = async () => { throw new Error("Jira network is prohibited during installation"); };
   for (const source of [variant === "local" ? "local" : archive]) {
     const home = join(directory, source === "local" ? "local home" : "tarball home");
@@ -69,14 +81,67 @@ try {
     const configPath = join(paths.config, "opencode.jsonc");
     const before = await readFile(configPath, "utf8");
     const copy = JSON.parse(before).plugins[0].package;
+    const sqlite = JSON.parse(await readFile(join(copy, "..", "..", "better-sqlite3", "package.json"), "utf8"));
+    assert.equal(sqlite.version, "13.2.0");
+    assert(!sqlite.scripts?.install && !sqlite.scripts?.postinstall && !sqlite.scripts?.preinstall);
+    const state = statePaths(paths.data);
+    assert(!state.directory.startsWith(copy));
+    assert(existsSync(state.database));
+    const { ChangeStore: CopiedStore } = await import(pathToFileURL(join(copy, "dist/state/store.js")).href);
+    const store = new ChangeStore(paths.data, { now: () => new Date("2026-11-17T10:00:00Z") });
+    assert.throws(() => new CopiedStore(paths.data), /Otra operación/);
+    const { stageUploadFiles } = await import(pathToFileURL(join(copy, "dist/state/staging.js")).href);
+    const location = join(directory, "project");
+    await mkdir(join(location, "exports"), { recursive: true, mode: 0o700 });
+    const origin = join(location, "exports", "sample.txt");
+    await writeFile(origin, "Synthetic staged bytes", { mode: 0o600 });
+    let readPermissions = 0;
+    const staged = await stageUploadFiles(store, [{ path: origin, publishedName: "sample.txt" }], {
+      location, uploadRoots: ["exports"], deniedPaths: [], signal: new AbortController().signal,
+      authorizeRead: async (path) => { assert.equal(path, origin); readPermissions++; }, revalidateContext: async () => {},
+      limits: { maxFileBytes: 1024, maxBatchBytes: 1024, maxFilesPerUpload: 1, transferTimeoutMs: 10000 },
+    });
+    assert.equal(readPermissions, 1);
+    await writeFile(origin, "Modified original");
+    assert.equal(await readFile(join(store.paths.staging, staged[0].stagedRef), "utf8"), "Synthetic staged bytes");
+    const plan = {
+      version: 1, id: "pack-proposal", sessionID: "pack-session", locationID: "a".repeat(64), account: "qa", site: "https://synthetic.invalid",
+      credentialIdentity: "synthetic-person", issueId: "1", issueKey: "SYN-1", projectKey: "SYN", kind: "upload", audience: "ticket", files: staged,
+      steps: [{ id: "step-1", kind: "mutation", fileRefs: [staged[0].stagedRef] }], expectedUpdated: "2026-11-17T10:00:00Z", policyFingerprint: "b".repeat(64),
+      payload: {}, summary: "Synthetic pack check", createdAt: "2026-11-17T10:00:00Z", expiresAt: "2026-11-17T10:10:00Z",
+    };
+    const saved = store.prepare(plan); store.close();
+    const status = execFileSync(process.execPath, [join(copy, "dist/cli.js"), "status", "--global", "--proposal", plan.id], { env, cwd: directory, encoding: "utf8", timeout: 10000 });
+    assert.equal(JSON.parse(status).state, "prepared");
+    const functionalRecord = join(home, "functional-proposal.json");
+    execFileSync(process.execPath, [functional, copy, "prepare", functionalRecord], { env, cwd: directory, stdio: "pipe", timeout: 20000 });
     for (const peer of uiPeers) assert(!existsSync(join(copy, "..", "..", peer, "package.json")));
     await install(source, io, { paths });
     assert.equal(await readFile(configPath, "utf8"), before);
+    const upgradeSource = join(directory, "upgrade-source");
+    await mkdir(upgradeSource);
+    execFileSync("tar", ["-xzf", archive, "-C", upgradeSource], { timeout: 10000 });
+    const nextPackage = join(upgradeSource, "package");
+    const versionParts = manifest.version.split(".");
+    const nextManifest = { ...manifest, version: `${versionParts[0]}.${versionParts[1]}.${Number(versionParts[2]) + 1}` };
+    await writeFile(join(nextPackage, "package.json"), JSON.stringify(nextManifest));
+    const nextResult = JSON.parse(execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", directory], { cwd: nextPackage, env: npmEnv, encoding: "utf8", timeout: 20000 }));
+    const nextPack = Array.isArray(nextResult) ? nextResult[0] : Object.values(nextResult)[0];
+    await install(join(directory, nextPack.filename), io, { paths });
+    const nextCopy = JSON.parse(await readFile(configPath, "utf8")).plugins[0].package;
+    assert.notEqual(nextCopy, copy); assert(existsSync(join(copy, "dist/index.js")));
+    assert.equal(await check(io, paths), 0);
+    execFileSync(process.execPath, [functional, nextCopy, "apply", functionalRecord], { env, cwd: directory, stdio: "pipe", timeout: 20000 });
     const resolution = source === "local" ? ["--no"] : ["--yes", `--package=${archive}`];
     const output = execFileSync("npm", ["exec", "--offline", ...resolution, "--", "issuekeeper-jira", "check", "--global"], { env, cwd: directory, encoding: "utf8", timeout: 40000 });
     assert(output.includes("No comprueba conectividad"));
     await uninstall(io, paths);
     assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")).plugins, []);
+    const reopened = new CopiedStore(paths.data);
+    assert.deepEqual(reopened.get(plan.id), saved);
+    assert.equal(await readFile(join(reopened.paths.staging, staged[0].stagedRef), "utf8"), "Synthetic staged bytes");
+    reopened.close();
+    execFileSync(process.execPath, [functional, nextCopy, "inspect", functionalRecord], { env, cwd: directory, stdio: "pipe", timeout: 20000 });
   }
   console.log(`Smoke ${variant}: instalación, npm exec, check, reinstalación y retirada correctos.`);
 } finally {

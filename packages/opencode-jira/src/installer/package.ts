@@ -4,20 +4,37 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { readFile, mkdtemp, rm, rename, lstat, open, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { createRequire } from "node:module";
+import { stateCompatibility } from "../state/store.js";
 import { hash, privateDirectory, readOptional, safeAncestors } from "./files.js";
 
 const exec = promisify(execFile);
 export const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
 export const packageName = "@issuekeeper/opencode-jira";
-const required = ["dist/index.js", "dist/cli.js", "templates/jira.md", "templates/account.example.jsonc", "options.schema.json"];
+const required = ["dist/index.js", "dist/cli.js", "dist/uploads.js", "dist/core/proposals.js", "dist/core/review.js", "dist/core/markdown.js", "dist/core/comment.js", "dist/core/adf-document.js", "dist/core/metadata.js", "dist/core/change-policy.js", "dist/state/store.js", "dist/state/coordinator.js", "dist/state/files.js", "dist/state/paths.js", "dist/state/errors.js", "dist/state/application.js", "dist/state/runtime.js", "dist/state/staging.js", "dist/state/multipart.js", "dist/state/review.js", "dist/state/operator.js", "dist/jira/changes.js", "dist/jira/mutations.js", "dist/jira/audience.js", "dist/jira/preparation.js", "dist/jira/attachment-links.js", "dist/tools/changes.js", "dist/tools/shared.js", "dist/tools/change-schemas.js", "dist/tools/change-permissions.js", "templates/jira.md", "templates/account.example.jsonc", "templates/commands/jira-get.md", "templates/commands/jira-list.md", "templates/commands/jira-update.md", "options.schema.json"];
 
 function validateManifest(manifest: Record<string, any>, version: string): void {
-  if (manifest.name !== packageName || manifest.version !== version || manifest.exports?.["."] !== "./dist/index.js"
+  if (manifest.name !== packageName || manifest.version !== version || typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version) || manifest.exports?.["."] !== "./dist/index.js"
     || manifest.type !== "module" || manifest.private !== true
     || manifest.bin?.["issuekeeper-jira"] !== "./dist/cli.js" || manifest.scripts?.preinstall || manifest.scripts?.postinstall || manifest.scripts?.install
     || manifest.dependencies?.["@opencode/plugin"] !== "2.2.5" || manifest.dependencies?.zod !== "4.6.7"
     || manifest.dependencies?.["jsonc-parser"] !== "3.3.1"
-    || Object.keys(manifest.dependencies ?? {}).length !== 3) throw new Error("Paquete incompatible o con scripts de instalación no admitidos.");
+    || manifest.dependencies?.["better-sqlite3"] !== "13.2.0"
+    || manifest.dependencies?.["mdast-util-from-markdown"] !== "2.0.2"
+    || manifest.dependencies?.["mdast-util-gfm-table"] !== "2.0.0"
+    || manifest.dependencies?.["micromark-extension-gfm-table"] !== "2.1.1"
+    || manifest.issuekeeperState?.database !== stateCompatibility.database || manifest.issuekeeperState?.plan !== stateCompatibility.plan
+    || Object.keys(manifest.dependencies ?? {}).length !== 7) throw new Error("Paquete incompatible o con scripts de instalación no admitidos.");
+}
+
+export function validateStorageEngine(root: string): void {
+  try {
+    const require = createRequire(join(root, "package.json"));
+    const Database = require("better-sqlite3") as typeof import("better-sqlite3");
+    const db = new Database(":memory:");
+    try { if (!db.prepare("SELECT sqlite_version() AS version").get()) throw new Error(); }
+    finally { db.close(); }
+  } catch { throw new Error("El motor SQLite incluido no funciona en este runtime; no se activará la copia preparada."); }
 }
 
 export async function validatePackage(root: string, version: string): Promise<void> {
@@ -27,6 +44,7 @@ export async function validatePackage(root: string, version: string): Promise<vo
   for (const file of required) {
     if (await readOptional(join(root, file)) === undefined) throw new Error("Paquete incompleto; ejecute build antes de empaquetar.");
   }
+  for (const file of ["README.md", "opencode.example.jsonc"]) if (await readOptional(join(root, file)) === undefined) throw new Error("Documentación distribuida incompleta.");
   if (!(await readFile(join(root, "dist/cli.js"), "utf8")).startsWith("#!/usr/bin/env node")) throw new Error("CLI sin shebang.");
 }
 
@@ -76,14 +94,16 @@ export async function preparePackage(source: string, data: string) {
     if (verbose.split("\n").some((entry) => entry && !["-", "d"].includes(entry[0]!))) throw new Error("No se admiten enlaces en el tarball.");
     const { stdout: metadata } = await exec("tar", ["-xOf", archive, "package/package.json"], { maxBuffer: 1024 * 1024 });
     const manifest = JSON.parse(metadata);
-    validateManifest(manifest, own.version);
+    validateManifest(manifest, manifest.version);
+    const version: string = manifest.version;
     const digest = hash(await readFile(archive));
     const release = join(data, "copies", digest);
     const installed = join(release, "node_modules", packageName);
     if (await readOptional(join(installed, "package.json")) !== undefined) {
-      await validatePackage(installed, own.version);
+      await validatePackage(installed, version);
       await validateDependencies(release);
-      return { installed, version: own.version as string };
+      validateStorageEngine(release);
+      return { installed, version };
     }
     const staging = join(scratch, "installation");
     await privateDirectory(staging);
@@ -91,14 +111,15 @@ export async function preparePackage(source: string, data: string) {
     await writeFile(join(staging, "source.tgz"), await readFile(archive), { mode: 0o600, flag: "wx" });
     // The server SDK's optional UI peers belong to the host, not this isolated backend copy.
     await exec("npm", ["install", "--ignore-scripts", "--legacy-peer-deps", "--no-audit", "--no-fund", "--save-exact", "./source.tgz"], { cwd: staging, maxBuffer: 8 * 1024 * 1024, timeout: 90000 });
-    await validatePackage(join(staging, "node_modules", packageName), own.version);
-    for (const dependency of ["@opencode/plugin", "zod", "jsonc-parser"]) {
+    await validatePackage(join(staging, "node_modules", packageName), version);
+    for (const dependency of ["@opencode/plugin", "zod", "jsonc-parser", "better-sqlite3"]) {
       if (await readOptional(join(staging, "node_modules", dependency, "package.json")) === undefined) throw new Error("Dependencias incompletas.");
     }
     await validateDependencies(staging);
+    validateStorageEngine(staging);
     await privateDirectory(dirname(release));
     await rename(staging, release);
-    return { installed, version: own.version as string };
+    return { installed, version };
   } catch {
     throw new Error("No se pudo preparar el paquete; la copia activa y la configuración no han cambiado.");
   } finally { await rm(scratch, { recursive: true, force: true }); }

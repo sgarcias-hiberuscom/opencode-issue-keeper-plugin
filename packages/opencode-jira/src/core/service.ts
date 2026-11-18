@@ -43,7 +43,7 @@ export class Service {
         account: account.id, label: account.label ?? account.id, site: account.siteUrl,
         default: account.id === this.config.defaultAccount,
         readOnly: account.readOnly, state, restrictedProjects: account.restrictedProjects,
-        capabilities: { ...this.provider.capabilities, read: true, serviceManagement: this.provider.capabilities.serviceManagement && account.serviceManagement.enabled, download: this.provider.capabilities.download && this.config.attachments.enabled && process.platform === "linux" },
+        capabilities: { ...this.provider.capabilities, remoteWrites: this.provider.capabilities.remoteWrites && !account.readOnly && process.platform === "linux", read: true, serviceManagement: this.provider.capabilities.serviceManagement && account.serviceManagement.enabled, download: this.provider.capabilities.download && this.config.attachments.enabled && process.platform === "linux" },
       };
     }));
   }

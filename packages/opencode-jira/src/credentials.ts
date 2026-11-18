@@ -27,3 +27,23 @@ export async function authorization(account: Account, env = process.env): Promis
     throw new IssueKeeperError("ACCOUNT_UNAVAILABLE", "Credencial ausente o no válida; revise la fuente y sus permisos en el servidor.");
   }
 }
+
+export interface CredentialLease { readonly identity: string; readonly account: string; readonly site: string }
+const leases = new WeakMap<CredentialLease, { authorization: string; configuration: string }>();
+
+export async function captureCredential(account: Account, probe: (authorization: string) => Promise<string>): Promise<CredentialLease> {
+  const header = await authorization(account);
+  const identity = await probe(header);
+  if (!identity || identity.length > 256 || /[\x00-\x1f\x7f]/.test(identity)) throw new IssueKeeperError("INVALID_RESPONSE", "Jira no proporcionó una identidad de escritura válida.");
+  const lease = Object.freeze({ identity, account: account.id, site: account.siteUrl });
+  leases.set(lease, { authorization: header, configuration: JSON.stringify(account) });
+  return lease;
+}
+
+export async function boundAuthorization(lease: CredentialLease, account: Account): Promise<string> {
+  const bound = leases.get(lease);
+  if (!bound || bound.configuration !== JSON.stringify(account) || bound.authorization !== await authorization(account)) {
+    throw new IssueKeeperError("CONFLICT", "La credencial o configuración cambió durante la validación; no se ha enviado el cambio.");
+  }
+  return bound.authorization;
+}

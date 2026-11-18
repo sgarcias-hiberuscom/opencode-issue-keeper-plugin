@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { Account, Config } from "../config.js";
 import { readFields } from "../config.js";
 import { IssueKeeperError, invalidResponse } from "../errors.js";
-import { apiUrl, HttpClient } from "../http.js";
+import { HttpClient } from "../http.js";
+import { attachmentLinkId } from "./attachment-links.js";
 import type { ReadAccess, TicketProvider, BinaryConsumer } from "../core/provider.js";
 import { Cursors } from "../core/cursors.js";
 import { checkProject } from "../core/policy.js";
@@ -18,7 +19,7 @@ const user = (u: z.infer<typeof UserSchema>): User => ({ id: u.accountId, ...(u.
 const requiredFields = ["project", "updated", "summary", "status"];
 
 export class JiraCloud implements TicketProvider {
-  readonly capabilities = { search: true, adf: true, serviceManagement: true, download: true, mentionCandidates: true, remoteWrites: false as const };
+  readonly capabilities = { search: true, adf: true, serviceManagement: true, download: true, mentionCandidates: true, remoteWrites: true };
   private readonly cursors = new Cursors();
   constructor(private readonly config: Config, readonly http: HttpClient) {}
   close(): void { this.cursors.close(); this.http.close(); }
@@ -231,17 +232,7 @@ export class JiraCloud implements TicketProvider {
         `rest/servicedeskapi/request/${ticket.data.key}/attachment?start=${start}&limit=${size}`, signal));
       this.checkPage(raw, start, size);
       const values = raw.values.map((attachment): Attachment => {
-        // Extract the ID only. Never follow response links or return signed content URLs.
-        let link: URL;
-        try { link = new URL(attachment._links.jiraRest); } catch { invalidResponse(); }
-        const match = /\/rest\/api\/[23]\/attachment\/([1-9][0-9]*)$/.exec(link.pathname);
-        const root = apiUrl(account, "rest/api/3/myself");
-        const prefix = root.pathname.replace(/rest\/api\/3\/myself$/, "");
-        const direct = link.origin === account.siteUrl && /^\/rest\/api\/[23]\/attachment\/[1-9][0-9]*$/.test(link.pathname);
-        const gateway = link.origin === root.origin && link.pathname.startsWith(prefix)
-          && /^rest\/api\/[23]\/attachment\/[1-9][0-9]*$/.test(link.pathname.slice(prefix.length));
-        if ((!direct && !gateway) || link.username || link.password || link.search || link.hash || !match) invalidResponse();
-        return { id: match[1]!, filename: attachment.filename, size: attachment.size, mimeType: attachment.mimeType, audience: "unknown", ...(attachment.author ? { author: user(attachment.author) } : {}), created: attachment.created };
+        return { id: attachmentLinkId(account, attachment._links.jiraRest), filename: attachment.filename, size: attachment.size, mimeType: attachment.mimeType, audience: "unknown", ...(attachment.author ? { author: user(attachment.author) } : {}), created: attachment.created };
       });
       return { data: { values, isLast: raw.isLastPage, cursor: this.cursors.next(scope, raw.isLastPage ? undefined : start + raw.size, previous) }, warnings: [...ticket.warnings, "JSM filtra por identidad; la API de adjuntos no declara su audiencia. Se conserva unknown."] };
     }

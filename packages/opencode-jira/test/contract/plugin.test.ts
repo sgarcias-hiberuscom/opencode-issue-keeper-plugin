@@ -32,11 +32,11 @@ function harness() {
 }
 
 describe("native OpenCode V2 contract", () => {
-  it("[6.7][E00][IN-04] registers eight read tools without network calls", async () => {
+  it("[6.7][E00][IN-04][REG-02] registers fifteen tools without network calls", async () => {
     const h = harness();
     const cleanup = await plugin.setup(h.context);
     expect(plugin.id).toBe("issuekeeper.jira");
-    expect([...h.tools.keys()].sort()).toEqual(["accounts_list", "attachment_download", "attachments_list", "comments_list", "connection_test", "issue_get", "issues_search", "mention_candidates"]);
+    expect([...h.tools.keys()].sort()).toEqual(["accounts_list", "attachment_download", "attachment_upload_prepare", "attachments_list", "change_apply", "comment_prepare", "comments_list", "connection_test", "issue_edit_metadata", "issue_get", "issue_update_prepare", "issues_search", "mention_candidates", "transition_prepare", "transitions_list"]);
     for (const tool of h.tools.values()) expect(tool.options?.namespace).toBe("jira");
     expect(h.assert).not.toHaveBeenCalled();
     await cleanup?.();

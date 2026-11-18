@@ -55,7 +55,7 @@ export const ConfigSchema = z.strictObject({
   }).prefault({}),
   changes: z.strictObject({
     ttlSeconds: integer(3600).default(defaults.changes.ttlSeconds),
-    requireExpectedUpdated: z.boolean().default(defaults.changes.requireExpectedUpdated),
+    requireExpectedUpdated: z.boolean().describe("La fase 2 exige fecha real y frescura incluso si esta opción es false; no habilita escrituras sin expectedUpdated.").default(defaults.changes.requireExpectedUpdated),
   }).prefault({}),
   attachments: z.strictObject({
     enabled: z.boolean().default(defaults.attachments.enabled),

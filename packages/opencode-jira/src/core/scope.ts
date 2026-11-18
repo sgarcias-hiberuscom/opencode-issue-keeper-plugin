@@ -17,3 +17,13 @@ export async function resolveSessionScope(
     throw new IssueKeeperError("FILE_ACCESS_DENIED", "No se puede validar la ubicación de la sesión; vuelva a cargar el plugin.");
   }
 }
+
+export async function resolveChangeScope(
+  sessionID: string,
+  getSession: () => Promise<{ id: string; location: { directory: string } }>,
+  compatibleDirectory: string,
+): Promise<SessionScope & { sessionID: string }> {
+  const session = await getSession();
+  if (session.id !== sessionID) throw new IssueKeeperError("FILE_ACCESS_DENIED", "La sesión de escritura no coincide con la del servidor.");
+  return { ...await resolveSessionScope(async () => session, compatibleDirectory), sessionID };
+}
