@@ -14,7 +14,8 @@ describe("[G2][TST-01][RC-03/04] integrated application process recovery", () =>
   it.each(["review", "sending", "accepted", "confirmed", "verified"])("survives SIGKILL at %s without another emitter attempt", async (checkpoint) => {
     const data = await mkdtemp("/tmp/opencode/jira-app-crash-"); roots.push(data);
     const child = fork(fileURLToPath(new URL("../fixtures/application-worker.mjs", import.meta.url)), [data, checkpoint], {
-      execArgv: ["--experimental-transform-types", "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))], env: {}, stdio: ["ignore", "ignore", "pipe", "ipc"],
+      // Runtimes before 26 accept the transform flag for TypeScript workers; 26 removed it and the loader transforms instead.
+      execArgv: [...(Number(process.versions.node.split(".")[0]!) < 26 ? ["--experimental-transform-types"] : []), "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))], env: {}, stdio: ["ignore", "ignore", "pipe", "ipc"],
     }); children.push(child);
     const ready = await new Promise((resolve, reject) => {
       let stderr = ""; child.stderr!.on("data", (value) => { stderr += String(value); });

@@ -226,7 +226,8 @@ describe("[ARC-02][UP-02–UP-04][UP-10] bounded private staging", () => {
   it.each(["copying", "copied"])("preserves and accounts for unassociated bytes after SIGKILL at %s", async (checkpoint) => {
     const f = await fixture(); const input = await f.source("file", Buffer.alloc(200000)); f.store.close();
     const child = fork(fileURLToPath(new URL("../fixtures/staging-worker.mjs", import.meta.url)), [f.data, f.location, input.path, checkpoint], {
-      execArgv: ["--experimental-transform-types", "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))],
+      // Runtimes before 26 accept the transform flag for TypeScript workers; 26 removed it and the loader transforms instead.
+      execArgv: [...(Number(process.versions.node.split(".")[0]!) < 26 ? ["--experimental-transform-types"] : []), "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))],
       env: {}, stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
     children.push(child);

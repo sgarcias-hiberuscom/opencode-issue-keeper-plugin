@@ -397,7 +397,8 @@ describe("[INS-01–INS-03][D-13][RC-10] shared maintenance ownership", () => {
     const template = `${await readFile(join(next.installed, "templates/jira.md"), "utf8")}\nVersioned synthetic instructions.\n`;
     await writeFile(join(next.installed, "templates/jira.md"), template);
     const child = fork(fileURLToPath(new URL("../fixtures/installer-worker.mjs", import.meta.url)), [home, checkpoint, next.installed, next.version, action], {
-      execArgv: ["--experimental-transform-types", "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))],
+      // Runtimes before 26 accept the transform flag for TypeScript workers; 26 removed it and the loader transforms instead.
+      execArgv: [...(Number(process.versions.node.split(".")[0]!) < 26 ? ["--experimental-transform-types"] : []), "--experimental-loader", fileURLToPath(new URL("../fixtures/state-loader.mjs", import.meta.url))],
       env: {}, stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
     try {

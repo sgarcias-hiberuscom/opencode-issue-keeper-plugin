@@ -11,7 +11,8 @@ separado; no se distribuyen datos privados del laboratorio en el paquete.
 ## Instalar
 
 Requiere Node >=22, npm y `tar`. La descarga segura y el estado global del
-instalador requieren Linux; persistencia validada con Node 22/24 en disco local.
+instalador requieren Linux; persistencia validada con Node 22/24/26 en disco
+local (26 verifica además el runtime embebido de OpenCode 2.3.x).
 
 La copia administrada contiene solo la parte de servidor y mantiene el SDK
 `@opencode/plugin` 2.2.5. La instalación usa `--legacy-peer-deps` para no resolver
@@ -487,7 +488,7 @@ node scripts/versions.mjs
 ```
 
 Informes separados en `reports/mock/` y `reports/live-read/`, excluidos de Git y del
-tarball. CI declara Node 22/24, vigencia del esquema, artefactos y job aislado del
+tarball. CI declara Node 22/24/26, vigencia del esquema, artefactos y job aislado del
 instalador. La matriz declarada no es evidencia de su ejecución.
 `npm test` sólo selecciona unitarias/contrato/instalador offline, incluso si hay
 variables live en el entorno. En checkout sin el documento local excluido de Git,

@@ -105,7 +105,13 @@ describe("[10.1][10.4] writes under load", () => {
     const reason = new Error("caller cancelled");
     const applying = f.harness.invoke("change_apply", { proposalId: plan.id }, controller.signal);
     const rejected = expect(applying).rejects.toBe(reason);
-    for (let i = 0; i < 20; i++) await tick();
+    // Abort only once the engine has claimed the proposal, so the outcome is deterministic across runtimes.
+    const executionState = () => {
+      const db = new Database(statePaths(f.data).database, { readonly: true });
+      try { return String((db.prepare("SELECT state FROM executions WHERE id=?").get(plan.id) as { state?: unknown } | undefined)?.state); } finally { db.close(); }
+    };
+    for (let i = 0; i < 1000 && executionState() !== "applying"; i++) await tick();
+    expect(executionState()).toBe("applying");
     expect(watch.state.started).toBe(3);
     controller.abort(reason);
     await rejected;
