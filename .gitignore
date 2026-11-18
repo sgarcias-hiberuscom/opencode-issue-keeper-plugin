@@ -6,5 +6,8 @@ reports/
 *.tgz
 *.tsbuildinfo
 /.idea/
-/doc/
+/doc/desglose-*
+/doc/plan-pruebas-*
+/doc/seguimiento-*
+/doc/spec.md
 /validation/

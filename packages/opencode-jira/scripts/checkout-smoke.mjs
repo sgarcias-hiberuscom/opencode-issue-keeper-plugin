@@ -13,6 +13,8 @@ try {
   await cp(join(root, "packages/opencode-jira"), pkg, { recursive: true, filter: (path) => !excluded.has(basename(path)) && !/\.(?:tgz|tsbuildinfo)$/.test(path) });
   await cp(join(root, ".opencode/commands"), join(project, ".opencode/commands"), { recursive: true });
   await mkdir(join(project, ".github/workflows"), { recursive: true });
+  await mkdir(join(project, "doc"), { recursive: true });
+  await cp(join(root, "doc/plugin-jira-opencode.md"), join(project, "doc/plugin-jira-opencode.md"));
   await cp(join(root, ".github/workflows/jira-read.yml"), join(project, ".github/workflows/jira-read.yml"));
   const cache = execFileSync("npm", ["config", "get", "cache"], { encoding: "utf8", timeout: 10000 }).trim();
   const env = { PATH: process.env.PATH, HOME: join(scratch, "home"), XDG_CONFIG_HOME: join(scratch, "config"), XDG_DATA_HOME: join(scratch, "data"), npm_config_cache: cache, npm_config_update_notifier: "false" };
@@ -22,9 +24,8 @@ try {
   const report = JSON.parse(await readFile(join(pkg, "reports/mock/results.json"), "utf8"));
   assert.equal(report.success, true); assert.equal(report.numFailedTests, 0);
   const skipped = report.testResults.flatMap((suite) => suite.assertionResults.filter((test) => test.status === "pending" || test.status === "skipped").map((test) => ({ file: suite.name, name: test.fullName })));
-  assert.equal(skipped.length, 7);
-  assert(skipped.every((test) => test.file.endsWith("/test/unit/documents.test.ts")));
-  console.log(JSON.stringify({ node: process.version, sourceOnly: true, passed: report.numPassedTests, skippedOptionalSpecification: skipped.length, failed: report.numFailedTests, typecheck: true, build: true }));
+  assert.equal(skipped.length, 0);
+  console.log(JSON.stringify({ node: process.version, sourceOnly: true, passed: report.numPassedTests, skipped: skipped.length, failed: report.numFailedTests, typecheck: true, build: true }));
 } catch (error) {
   if (error.stdout) console.error(String(error.stdout));
   if (error.stderr) console.error(String(error.stderr));
