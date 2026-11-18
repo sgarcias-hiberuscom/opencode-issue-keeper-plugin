@@ -31,6 +31,14 @@ describe("safe CLI diagnostics", () => {
     expect(JSON.stringify(print.mock.calls)).not.toContain("private-value");
   });
 });
+describe("[6.9][cli] install source arguments", () => {
+  it("falls back to the registry source for install without --source", () => {
+    expect(parseArguments(["install", "--global"])).toEqual({ command: "install", source: "registry" });
+  });
+  it("still requires a value for --source when given", () => {
+    expect(() => parseArguments(["install", "--global", "--source"])).toThrow();
+  });
+});
 describe("[11.4][cli] global status arguments", () => {
   it("accepts status --global without a proposal", () => {
     expect(parseArguments(["status", "--global"])).toEqual({ command: "status", source: undefined });

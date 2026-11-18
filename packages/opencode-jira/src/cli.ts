@@ -16,7 +16,7 @@ import { StateError } from "./state/errors.js";
 export function parseArguments(args: string[]) {
   const [command, ...rest] = args;
   const proposalCommand = ["review", "status", "verify"].includes(command ?? "");
-  if (!["install", "check", "uninstall", "review", "status", "verify"].includes(command ?? "") || !rest.includes("--global")) throw new Error("Uso: issuekeeper-jira install --global --source local|archivo.tgz | check --global | uninstall --global | review|verify --global --proposal ID | status --global [--proposal ID]");
+  if (!["install", "check", "uninstall", "review", "status", "verify"].includes(command ?? "") || !rest.includes("--global")) throw new Error("Uso: issuekeeper-jira install --global [--source local|archivo.tgz] | check --global | uninstall --global | review|verify --global --proposal ID | status --global [--proposal ID]");
   const allowed = command === "install" ? ["--global", "--source"] : proposalCommand ? ["--global", "--proposal"] : ["--global"];
   let source: string | undefined;
   let proposalId: string | undefined;
@@ -33,7 +33,7 @@ export function parseArguments(args: string[]) {
       source = rest[++i]!;
     }
   }
-  if (command === "install" && !source) throw new Error("La instalación desde registro no está disponible; use --source local o un tarball .tgz.");
+  if (command === "install" && !source) source = "registry";
   if (proposalCommand && command !== "status" && !proposalId) throw new Error("--proposal es obligatorio.");
   return { command: command!, source, ...(proposalId ? { proposalId } : {}) };
 }

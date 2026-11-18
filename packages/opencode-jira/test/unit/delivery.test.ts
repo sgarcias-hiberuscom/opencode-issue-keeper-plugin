@@ -22,7 +22,7 @@ describe("[M4][PKG-01][TST-03][EN-01][OP-05] independent and offline delivery", 
   it("keeps CI secrets behind manual non-fork protected read integration and uploads only selected reports", async () => {
     const workflow = await read("../../../../.github/workflows/jira-read.yml");
     const offline = workflow.slice(0, workflow.indexOf("  live-read:")); const live = workflow.slice(workflow.indexOf("  live-read:"));
-    expect(offline).not.toContain("secrets."); expect(offline).toContain("node: [22, 24]");
+    expect(offline).not.toContain("secrets."); expect(offline).toContain("node: [22, 24, 26]");
     expect(offline).toContain("npm run test:mock"); expect(offline).toContain("npm run test:pack");
     expect(live).toContain("github.event_name == 'workflow_dispatch' && inputs.live && github.event.repository.fork == false");
     expect(live).toContain("environment: jira-integration"); expect(live).toContain("npm run test:live:read");

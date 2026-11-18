@@ -33,8 +33,9 @@ npm exec --legacy-peer-deps --package=/ruta/issuekeeper-opencode-jira-0.2.0.tgz 
 ```
 
 El instalador muestra el plan y requiere aceptación en una terminal interactiva.
-No hay aprobación implícita ni `--yes`. Sin `--source`, informa de que la
-instalación desde registro aún no está disponible. No contacta Jira ni lee tokens.
+No hay aprobación implícita ni `--yes`. Sin `--source`, instala desde el registro
+npm configurado la versión exacta del CLI que se ejecuta, verificando nombre,
+versión e integridad SHA-512 del tarball. No contacta Jira ni lee tokens.
 
 ```bash
 issuekeeper-jira check --global

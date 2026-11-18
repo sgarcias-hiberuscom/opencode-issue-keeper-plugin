@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { readFile, mkdtemp, rm, rename, lstat, open, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { stateCompatibility } from "../state/store.js";
 import { hash, privateDirectory, readOptional, safeAncestors } from "./files.js";
@@ -15,7 +16,7 @@ const required = ["dist/index.js", "dist/cli.js", "dist/uploads.js", "dist/core/
 
 function validateManifest(manifest: Record<string, any>, version: string): void {
   if (manifest.name !== packageName || manifest.version !== version || typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version) || manifest.exports?.["."] !== "./dist/index.js"
-    || manifest.type !== "module" || manifest.private !== true
+    || manifest.type !== "module" || typeof manifest.private !== "boolean"
     || manifest.bin?.["issuekeeper-jira"] !== "./dist/cli.js" || manifest.scripts?.preinstall || manifest.scripts?.postinstall || manifest.scripts?.install
     || manifest.dependencies?.["@opencode/plugin"] !== "2.2.5" || manifest.dependencies?.zod !== "4.6.7"
     || manifest.dependencies?.["jsonc-parser"] !== "3.3.1"
@@ -48,6 +49,49 @@ export async function validatePackage(root: string, version: string): Promise<vo
   if (!(await readFile(join(root, "dist/cli.js"), "utf8")).startsWith("#!/usr/bin/env node")) throw new Error("CLI sin shebang.");
 }
 
+// Controlled failure messages from the registry path: they are safe to surface
+// to the user and must never include npm output (which may echo .npmrc URLs).
+const registryFailures = ["Versión no encontrada en el registro.", "El registro devolvió un paquete distinto.", "Integridad del paquete no coincide.", "Registro no accesible."];
+
+function registryArgument(): string[] {
+  const value = process.env.ISSUEKEEPER_REGISTRY;
+  if (value === undefined) return [];
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("Registro no accesible."); }
+  const loopback = url.protocol === "http:" && ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname);
+  if (url.protocol !== "https:" && !loopback) throw new Error("Registro no accesible.");
+  return ["--registry", value];
+}
+
+async function downloadRegistryPackage(scratch: string, version: string): Promise<string> {
+  const common = [...registryArgument(), "--ignore-scripts"];
+  let metadata: Record<string, any>;
+  try {
+    const { stdout } = await exec("npm", ["view", `${packageName}@${version}`, "name", "version", "dist.integrity", "dist.tarball", "--json", ...common], { cwd: scratch, maxBuffer: 8 * 1024 * 1024, timeout: 90000 });
+    const parsed = JSON.parse(stdout);
+    metadata = (Array.isArray(parsed) ? parsed[0] : parsed) ?? {};
+  } catch (error) {
+    const output = `${(error as { stdout?: string }).stdout ?? ""}${(error as { stderr?: string }).stderr ?? ""}`;
+    if (/\bE404\b/.test(output)) throw new Error("Versión no encontrada en el registro.");
+    throw new Error("Registro no accesible.");
+  }
+  const integrity = metadata["dist.integrity"] ?? metadata.dist?.integrity;
+  if (metadata.name !== packageName || metadata.version !== version) throw new Error("El registro devolvió un paquete distinto.");
+  if (typeof integrity !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) throw new Error("Integridad del paquete no coincide.");
+  let filename: unknown;
+  try {
+    const { stdout } = await exec("npm", ["pack", `${packageName}@${version}`, "--json", ...common, "--pack-destination", scratch], { cwd: scratch, maxBuffer: 8 * 1024 * 1024, timeout: 90000 });
+    const parsed = JSON.parse(stdout);
+    filename = (Array.isArray(parsed) ? parsed[0] : Object.values(parsed ?? {})[0])?.filename;
+  } catch { throw new Error("Registro no accesible."); }
+  if (typeof filename !== "string" || !filename || filename.includes("/") || filename.includes("\\")) throw new Error("El registro devolvió un paquete distinto.");
+  const archive = join(scratch, filename);
+  const digest = `sha512-${createHash("sha512").update(await readFile(archive)).digest("base64")}`;
+  if (digest !== integrity) throw new Error("Integridad del paquete no coincide.");
+  return archive;
+}
+
 export async function validateDependencies(root: string): Promise<void> {
   const lock = JSON.parse((await readOptional(join(root, "package-lock.json"))) ?? "{}") as {
     packages?: Record<string, { version?: string; optional?: boolean; link?: boolean }>;
@@ -74,6 +118,8 @@ export async function preparePackage(source: string, data: string) {
       const result = JSON.parse(stdout);
       const packed = Array.isArray(result) ? result[0] : Object.values(result)[0];
       archive = join(scratch, packed.filename);
+    } else if (source === "registry") {
+      archive = await downloadRegistryPackage(scratch, own.version);
     } else {
       const origin = resolve(source);
       await safeAncestors(origin);
@@ -94,6 +140,7 @@ export async function preparePackage(source: string, data: string) {
     if (verbose.split("\n").some((entry) => entry && !["-", "d"].includes(entry[0]!))) throw new Error("No se admiten enlaces en el tarball.");
     const { stdout: metadata } = await exec("tar", ["-xOf", archive, "package/package.json"], { maxBuffer: 1024 * 1024 });
     const manifest = JSON.parse(metadata);
+    if (source === "registry" && (manifest.name !== packageName || manifest.version !== own.version)) throw new Error("El registro devolvió un paquete distinto.");
     validateManifest(manifest, manifest.version);
     const version: string = manifest.version;
     const digest = hash(await readFile(archive));
@@ -120,7 +167,8 @@ export async function preparePackage(source: string, data: string) {
     await privateDirectory(dirname(release));
     await rename(staging, release);
     return { installed, version };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && registryFailures.includes(error.message)) throw error;
     throw new Error("No se pudo preparar el paquete; la copia activa y la configuración no han cambiado.");
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }

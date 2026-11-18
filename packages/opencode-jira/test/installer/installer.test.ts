@@ -249,7 +249,7 @@ describe("[6.9][E00][IN-02] isolated global installer", () => {
 
 describe("[6.9][E00][IN-01] CLI arguments and filesystem primitives", () => {
   it.each([[], ["install"], ["check"], ["check", "--global", "--unknown"],
-    ["install", "--global"], ["install", "--global", "--source"], ["install", "--global", "--source", "--global"],
+    ["install", "--global", "--source"], ["install", "--global", "--source", "--global"],
     ["install", "--global", "--global", "--source", "local"], ["uninstall", "--global", "--source", "local"],
   ].map((args) => [args]))("rejects invalid argv without effects (%#)", (args) => { expect(() => parseArguments(args)).toThrow(); });
   it("rejects concurrent replacement without modifying the destination", async () => {
