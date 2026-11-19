@@ -16,7 +16,7 @@ const parsed = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json"], {
 const packed: Packed = (Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0])!;
 const paths = packed.files.map((file) => file.path);
 
-describe("[8.4][T13] distributed package content", () => {
+describe("[8.4] distributed package content", () => {
   it("contains only allowlisted paths, without duplicates or omissions", () => {
     const allowed: (string | RegExp)[] = [
       /^dist\/[\w/.-]+\.js$/,

@@ -2,18 +2,18 @@ import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 import { planHash } from "../../src/core/proposals.js";
 import { verifyRecorded } from "../../src/state/operator.js";
 import { ChangeStore } from "../../src/state/store.js";
 
-const fixtures: Awaited<ReturnType<typeof m3Fixture>>[] = [];
+const fixtures: Awaited<ReturnType<typeof changeFixture>>[] = [];
 beforeEach(() => vi.stubEnv("IK_TEST_WORK", "synthetic-token"));
 afterEach(async () => { for (const f of fixtures.splice(0)) { await f.close(); await rm(f.root, { recursive: true, force: true }); } vi.unstubAllEnvs(); });
-async function fixture(scoped = false) { const f = await m3Fixture(scoped); fixtures.push(f); return f; }
+async function fixture(scoped = false) { const f = await changeFixture(scoped); fixtures.push(f); return f; }
 const destinations = ["ticket", "internal", "public"] as const;
 
-describe("[M3][MET/APL/REG][AT/TR] functional tools", () => {
+describe("[MET/APL/REG][AT/TR] functional tools", () => {
   it("keeps the empty base usable with fifteen tools and rejects changes without remote permissions or I/O", async () => {
     const f = await fixture(); f.c.accounts = [];
     expect(f.harness.tools.size).toBe(15); expect(f.fetcher).not.toHaveBeenCalled();
@@ -131,7 +131,7 @@ describe("[M3][MET/APL/REG][AT/TR] functional tools", () => {
   });
 });
 
-describe("[M3][TXT/MEN/CMT][CM-02–12] protected comments", () => {
+describe("[TXT/MEN/CMT][CM-02–12] protected comments", () => {
   it.each(["ticket", "internal", "public"] as const)("rejects a whitespace-only %s comment before persisting or publishing a proposal", async (audience) => {
     const f = await fixture();
     const result = await f.harness.invoke("comment_prepare", { account: "work", issueKey: "IK-1", expectedUpdated: f.remote.fields.updated, audience, text: " \t\r\n " });
@@ -230,7 +230,7 @@ describe("[M3][TXT/MEN/CMT][CM-02–12] protected comments", () => {
   });
 });
 
-describe("[M3][ARC/UP/REC][UP-01–10][RC-05–09] pinned uploads", () => {
+describe("[ARC/UP/REC][UP-01–10][RC-05–09] pinned uploads", () => {
   it("cleans only its unassociated staging after a policy change during preparation", async () => {
     const f = await fixture(); const file = await f.source();
     f.harness.assert.mockImplementation(async (request: unknown) => { if ((request as { action: string }).action === "read") f.c.accounts[0]!.readOnly = true; });

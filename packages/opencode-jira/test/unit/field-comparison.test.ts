@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sameADF, sameField, sameVisibility } from "../../src/jira/changes.js";
 
-describe("[M5][AT-02/03][RC-03] Jira field verification semantics", () => {
+describe("[AT-02/03][RC-03] Jira field verification semantics", () => {
   it.each(["labels", "components", "fixVersions", "versions"])("compares %s as an unordered collection without losing elements", (field) => {
     const a = field === "labels" ? "a" : { id: "1" }; const b = field === "labels" ? "b" : { id: "2" };
     expect(sameField(field, [a, b], [b, a])).toBe(true);
@@ -38,7 +38,7 @@ describe("[M5][AT-02/03][RC-03] Jira field verification semantics", () => {
   });
 });
 
-describe("[M5][CM-09][RC-03] resolved comment visibility", () => {
+describe("[CM-09][RC-03] resolved comment visibility", () => {
   it.each(["role", "group"])("accepts only matching %s visibility with optional server identifier", (type) => {
     const expected = { type, value: "Team" };
     expect(sameVisibility({ ...expected, identifier: "server-identifier" }, expected)).toBe(true);
@@ -65,7 +65,7 @@ describe("[M5][CM-09][RC-03] resolved comment visibility", () => {
   });
 });
 
-describe("[M5][CM-03/06][RC-03] resolved ADF mention verification", () => {
+describe("[CM-03/06][RC-03] resolved ADF mention verification", () => {
   const mention = { type: "mention", attrs: { id: "person", text: "Ana" } };
   const text = { type: "text", text: "hello" };
   const doc = (content: unknown[]) => ({ type: "doc", version: 1, content: [{ type: "paragraph", content }] });

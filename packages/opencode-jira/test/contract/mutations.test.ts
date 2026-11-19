@@ -4,7 +4,7 @@ import { captureCredential, boundAuthorization } from "../../src/credentials.js"
 import { mutationRequest, MutationUncertainError, type JiraMutation } from "../../src/jira/mutations.js";
 import { config, json, mockFetch, signal } from "../helpers.js";
 
-describe("[M5][CM-09] canonical visibility wire representation", () => {
+describe("[CM-09] canonical visibility wire representation", () => {
   it.each(["role", "group"] as const)("sends only the pinned %s identifier while retaining its reviewed name", (type) => {
     const body = { type: "doc" as const, version: 1 as const, content: [{ type: "paragraph", content: [{ type: "text", text: "private" }] }] };
     const visibility = { type, value: "Reviewed name", identifier: type === "group" ? "stable-group-id" : "Reviewed role" };

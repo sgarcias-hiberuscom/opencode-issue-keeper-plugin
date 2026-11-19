@@ -1,13 +1,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 import { config, createService, issue, json, mockFetch } from "../helpers.js";
 import { toolHarness } from "../harness.js";
 import { planHash } from "../../src/core/proposals.js";
 import { verifyRecorded } from "../../src/state/operator.js";
 
-const fixtures: Awaited<ReturnType<typeof m3Fixture>>[] = [];
+const fixtures: Awaited<ReturnType<typeof changeFixture>>[] = [];
 const scratch: string[] = [];
 beforeEach(() => {
   vi.stubEnv("IK_TEST_WORK", "token-before");
@@ -20,12 +20,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
-async function fixture() { const f = await m3Fixture(); fixtures.push(f); return f; }
+async function fixture() { const f = await changeFixture(); fixtures.push(f); return f; }
 const tokenOf = (init: RequestInit | undefined) => {
   const header = (init?.headers as Record<string, string> | undefined)?.Authorization ?? "";
   return Buffer.from(header.slice(6), "base64").toString().split(":").slice(1).join(":");
 };
-const mutationTokens = (f: Awaited<ReturnType<typeof m3Fixture>>) => f.fetcher.mock.calls.filter(([, init]) => init?.method === "POST" || init?.method === "PUT").map(([, init]) => tokenOf(init));
+const mutationTokens = (f: Awaited<ReturnType<typeof changeFixture>>) => f.fetcher.mock.calls.filter(([, init]) => init?.method === "POST" || init?.method === "PUT").map(([, init]) => tokenOf(init));
 
 describe("[11.3][10.1][10.4] rotation, identity and recovery", () => {
   it("[11.3][rotation] applies after a tokenFile rotation of the same identity without changing the plan", async () => {

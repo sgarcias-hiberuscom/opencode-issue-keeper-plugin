@@ -1,12 +1,12 @@
 import { mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 import { json } from "../helpers.js";
 import { verifyRecorded } from "../../src/state/operator.js";
 import type { ErrorCode } from "../../src/errors.js";
 
-type Fixture = Awaited<ReturnType<typeof m3Fixture>>;
+type Fixture = Awaited<ReturnType<typeof changeFixture>>;
 const fixtures: Fixture[] = [];
 beforeEach(() => {
   vi.stubEnv("IK_TEST_WORK", "synthetic-token");
@@ -17,7 +17,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
-async function fixture() { const f = await m3Fixture(); fixtures.push(f); return f; }
+async function fixture() { const f = await changeFixture(); fixtures.push(f); return f; }
 
 const stagingDirectory = (f: Fixture) => join(f.data, "runtime", "staging");
 const mutations = (f: Fixture) => f.fetcher.mock.calls.filter(([, init]) => init?.method === "POST" || init?.method === "PUT");

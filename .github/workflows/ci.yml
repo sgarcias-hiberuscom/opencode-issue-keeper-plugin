@@ -1,9 +1,9 @@
-name: Jira protected plugin
+name: CI
 on:
   push:
-    paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/jira-read.yml"]
+    paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/ci.yml"]
   pull_request:
-    paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/jira-read.yml"]
+    paths: ["packages/opencode-jira/**", "doc/**", ".opencode/commands/**", ".github/workflows/ci.yml"]
   workflow_dispatch:
     inputs:
       live:

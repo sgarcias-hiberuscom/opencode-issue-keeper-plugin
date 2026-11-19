@@ -16,7 +16,7 @@ import Database from "better-sqlite3";
 import { fork } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 
 let home: string;
 let paths: InstallerPaths;
@@ -423,7 +423,7 @@ describe("[INS-01–INS-03][D-13][RC-10] shared maintenance ownership", () => {
   }, 20000);
   it.each(["approval", "sending", "cleanup"])("blocks replacement and removal during the integrated engine's %s window", async (window) => {
     await runInstall(); vi.stubEnv("IK_TEST_WORK", "synthetic-token");
-    const f = await m3Fixture(false, paths.data);
+    const f = await changeFixture(false, paths.data);
     let release!: () => void; const wait = new Promise<void>((resolve) => { release = resolve; });
     let entered!: () => void; const ready = new Promise<void>((resolve) => { entered = resolve; });
     let task: Promise<unknown> | undefined;

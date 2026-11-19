@@ -6,6 +6,7 @@ reports/
 *.tgz
 *.tsbuildinfo
 /.idea/
+*.iml
 /doc/desglose-*
 /doc/plan-pruebas-*
 /doc/seguimiento-*

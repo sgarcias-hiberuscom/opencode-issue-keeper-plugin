@@ -3,10 +3,6 @@
 Plugin privado de servidor **OpenCode V2**. Quince herramientas: ocho de lectura
 y descarga local, metadata/transiciones y preparación/aplicación protegida de
 atributos, comentarios Platform/JSM, transiciones y cargas Platform/JSM.
-Entrega privada **0.2.1**: implementación protegida y correcciones verificadas de
-normalización Jira, visibilidad estable, diagnósticos y espera de aprobación.
-Las evidencias y el acta de la campaña REAL/manual de fase 2 se conservan por
-separado; no se distribuyen datos privados del laboratorio en el paquete.
 
 ## Instalar
 
@@ -127,7 +123,7 @@ incompleta. Una exportación ajena o diferente nunca se sobrescribe. La publicac
 de configuración/manifiesto sincroniza el archivo y su directorio en disco local.
 No borrar locks, `runtime/` ni copias para forzar una actualización.
 
-Política de conservación aprobada para fase 2:
+Política de conservación:
 
 - Resultados terminados: 7 días; propuestas nunca enviadas: 24 horas desde su
   caducidad. La limpieza normal se ejecuta al preparar, no al consultar un recibo.
@@ -145,7 +141,7 @@ Política de conservación aprobada para fase 2:
   journal de limpieza recuperable. No borra descargas ni archivos ajenos; material
   alterado o huérfano sin asociación fiable se conserva y cuenta para la cuota.
 
-Cargas protegidas de fase 2:
+Cargas protegidas:
 
 - Lectura de orígenes Linux mediante descriptores y `O_NOFOLLOW`, sólo bajo
   `uploadRoots` dentro de la ubicación. El llamante debe aportar ubicación
@@ -169,11 +165,7 @@ Cargas protegidas de fase 2:
   puede dejar staging sin plan: se conserva y cuenta para cuota, no se adopta ni
   elimina por su nombre. La asociación duradera se realiza mediante `prepare`.
 
-**Estado de entrega:** todos los tipos conectan al motor protegido y al catálogo
-de quince, con pruebas automatizadas de contrato/LAB y entrega independiente del
-checkout. No equivale al cierre de la campaña REAL ni modifica por sí misma la
-instalación activa o sus permisos.
-Cargar el plugin con base vacía sigue sin abrir el almacén ni usar red.
+Cargar el plugin con base vacía no abre el almacén ni usa la red.
 
 ### Revisión y procedimiento del operador
 
@@ -274,8 +266,6 @@ el mantenimiento y al diagnosticar presión de cuota; no se renueva el TTL.
 
 ### Matriz de representación implementada
 
-Contrato comprobado por regresión y matriz funcional REAL del laboratorio M5;
-las evidencias privadas distinguen verificaciones API y observaciones humanas.
 Las dos columnas JSM cubren también `additionalComment.body` al publicar adjuntos.
 La audiencia nunca cambia para conseguir compatibilidad.
 
@@ -293,9 +283,6 @@ La audiencia nunca cambia para conseguir compatibilidad.
 
 Ante `FORMAT_INVALID`/`FORMAT_NOT_SUPPORTED`, aceptar una alternativa significa
 preparar **otro plan**, con hash y revisión nuevos; nunca convertir al aplicar.
-
-Regresión funcional offline: `npm run test:phase2:functional`; la suite completa
-`npm run test:mock` conserva también las pruebas de lectura, estado e instalador.
 
 Alternativa manual: integrar [opencode.example.jsonc](./opencode.example.jsonc)
 sin reemplazar la configuración existente y registrar
@@ -327,7 +314,7 @@ pedir permisos remotos; apply sólo acepta un `proposalId` local válido.
 - Alias explícito en cada operación; `defaultAccount` sólo puede ser un alias existente.
 - `restrictedProjects: []` por defecto: bloquea los proyectos enumerados, no permite
   únicamente esos proyectos. Se verifica siempre el proyecto **real**, no el prefijo.
-- `restrictedUpdateFields: []` se valida, pero no restringe lecturas en esta fase.
+- `restrictedUpdateFields: []` se valida, pero no restringe lecturas.
 - Las antiguas opciones `allowedProjects`, `allowedReadFields` y
   `allowedUpdateFields` se rechazan.
 - Una sola fuente: `tokenFile` absoluto, regular, sin symlink final, del usuario y
@@ -471,32 +458,24 @@ tabla; omisión avisada de resultados restringidos; projectTypeKey para Platform
 GET JSM servicedesk de bajo coste; tokenFile Windows no soportado; overwrite sólo
 false; comandos sincronizados con 9.3.
 
-## Pruebas y pendientes
+## Desarrollo y pruebas
 
 ```bash
 npm run typecheck
 npm run test:mock
 npm run test:pack
-npm run test:phase2:storage
-npm run test:phase2:files
-npm run test:phase2:engine
-npm run test:phase2:functional
-npm run test:phase2:delivery
-npm run test:phase2:campaign
+npm run test:installer
 npm run test:checkout
 npm run build
 node scripts/versions.mjs
 ```
 
-Informes separados en `reports/mock/` y `reports/live-read/`, excluidos de Git y del
-tarball. CI declara Node 22/24/26, vigencia del esquema, artefactos y job aislado del
-instalador. La matriz declarada no es evidencia de su ejecución.
+CI comprueba Node 22/24/26, la vigencia del esquema y el instalador aislado.
 `npm test` sólo selecciona unitarias/contrato/instalador offline, incluso si hay
-variables live en el entorno. En checkout sin el documento local excluido de Git,
-sólo las comprobaciones opcionales contra esa especificación se omiten y se
-reportan como tales; defaults, esquemas, plantillas y comandos versionados se
-comprueban siempre. El smoke prepara desde una copia instalada, actualiza a un
-tarball de versión sintética compatible, aplica con journal/permisos
+variables live en el entorno. Se comprueban la especificación versionada,
+los valores por defecto, esquemas, plantillas y comandos. La prueba de paquete
+prepara desde una copia instalada, actualiza a un tarball de versión sintética
+compatible, aplica con journal/permisos
 instrumentados, deduplica y comprueba recibos después de retirar, sin Jira real.
 
 Para integración real, preparar fuera del repositorio opciones e inventario con
@@ -513,12 +492,10 @@ ISSUEKEEPER_LIVE_INVENTORY=/ruta/privada/inventory.json npm run test:live:read
 Permisos instrumentados del SDK, no una demostración de su política en servidor.
 El workflow manual requiere configurar y proteger el entorno `jira-integration`
 y sus secretos; nunca se activa desde pull requests ni forks.
-`test:live` es un alias de sólo lectura por compatibilidad. No selecciona suites
-futuras de escritura. La campaña de escritura de M5 queda exclusivamente local y
-autorizada por separado: no hay selector, credencial de escritura ni subida de
-informes privados de esa campaña en CI. Omitida no significa superada.
+`test:live` es un alias de sólo lectura. La campaña de escritura es exclusivamente
+local, requiere autorización independiente y no se ejecuta en CI.
 
-El controlador local `scripts/phase2-campaign.mjs` recibe un paquete **instalado**,
+El controlador local `scripts/live-write-campaign.mjs` recibe un paquete **instalado**,
 una configuración JSONC con un único plugin Jira y un manifiesto privado versionado
 (`version: 1`, `targets`, `scenarios`, `maxMutations`, `retentionReview`). Cada destino
 declara `account`, `site`, `issueKey` y, para temporales JSM, `serviceDeskId`. Cada
@@ -529,7 +506,7 @@ de la metadata real. Las cargas usan `fixtures` ficticios (`name`, `kind`:
 
 ```bash
 XDG_DATA_HOME=/ruta/privada/campaña-nueva/data \
-node scripts/phase2-campaign.mjs /ruta/paquete-instalado \
+node scripts/live-write-campaign.mjs /ruta/paquete-instalado \
   /ruta/config-qa.jsonc /ruta/manifiesto-qa.json \
   /ruta/privada/campaña-nueva --qa-authorized
 ```
@@ -542,12 +519,8 @@ ledger privado sin cabeceras ni URLs de medios, y se detiene ante un fallo sin
 repetir el envío. No se debe relanzar una campaña incierta: recuperar mediante
 `status`/`verify`, sin editar estados ni crear propuestas duplicadas.
 
-`scripts/phase2-fixtures.mjs` admite inventario acotado y creación explícita de
-tickets/solicitudes QA con prefijo `IK-M5-QA `, manifiesto privado y el mismo opt-in;
-no administra proyectos, usuarios ni workflows. Ambos controladores son utilidades
-del checkout, no herramientas del modelo ni parte del tarball. Sus permisos SDK son
-**instrumentados**, no decisiones humanas. Un resultado automático satisfactorio
-no cierra G3/G4 ni sustituye contraste web, dos proveedores y permisos nativos.
+El controlador es una utilidad del checkout, no una herramienta del modelo ni
+parte del tarball. Sus permisos SDK son **instrumentados**, no decisiones humanas.
 
 En comentarios restringidos, la revisión conserva el nombre y la referencia
 resuelta. Para grupos se fija además su ID estable y se revalida antes del envío;
@@ -571,27 +544,8 @@ identifica `PARTIAL_UPLOAD` cuando hay remanente conocido y `WRITE_OUTCOME_UNKNO
 cuando falta acreditar un envío o su verificación. Ninguno es reintentable; la
 incertidumbre prevalece aunque otros archivos tengan recibos confirmados.
 
-Controlador local sin Jira: `npm run build` y
-`node scripts/lab.mjs HT-01`…`HT-08`. Variantes: HT-02 código HTTP;
-HT-03 `cancel`; HT-04 `redirect`/`large`; HT-05 `restricted`; HT-06 `redirect`.
-Usa identidades ficticias y transporte inyectado; no equivale a observación real.
-
-Controlador ampliado, también sin red ni credenciales reales:
-`node scripts/lab-closure.mjs HT-01`…`HT-08`. Admite además `BU-04`, `PE-06`
-y `DE-06`…`DE-08`. Registra variantes y comprobaciones observables: espera,
-colas, validación de medios, permisos previos, cancelación tras recibir bytes,
-cambio de ubicación y almacenamiento simulado. Los errores ENOSPC/EIO se inyectan
-solo en descriptores del directorio privado del caso; no se llena el disco.
-Cada ejecución tiene presupuesto de 30 segundos y conserva el aislamiento de
-las evidencias LOCAL/LAB respecto de Jira real.
-
-El cierre requiere el informe privado de campaña, no solo pruebas automatizadas:
-dos proyectos/modelos, políticas reales, ambas identidades JSM, scopes, hashes,
-rotación real de token y todas las variantes obligatorias. El laboratorio sintético
-no sustituye esas evidencias ni demuestra resistencia exhaustiva a procesos
-hostiles del mismo UID. No hay barrido general de temporales huérfanos ni cuota
-para descargas (ADJ-04), ni división completa de cloud.ts (ARQ-05); las cuotas de
-base/staging de escritura sí se aplican según la política anterior.
+No hay barrido general de temporales huérfanos ni cuota para descargas; las cuotas
+de base de datos y staging de escritura sí se aplican según la política anterior.
 El instalador no verifica todos los archivos transitivos contra un inventario de
 integridad; conflictos complejos de migración requieren revisión manual.
 
@@ -599,4 +553,4 @@ Excluir `.issuekeeper/` de Git y del contexto en otros proyectos. Los permisos
 0700 no aíslan procesos maliciosos del mismo UID: se requiere separación del host.
 Dependencias fijadas: SDK 2.2.5, Zod 4.6.7, jsonc-parser 3.3.1. npm audit mantiene
 21 avisos moderados transitivos; no se fuerzan actualizaciones incompatibles.
-Uso interno, sin publicación ni licencia de distribución elegida.
+Licencia propietaria de uso interno; ver [LICENSE](./LICENSE).

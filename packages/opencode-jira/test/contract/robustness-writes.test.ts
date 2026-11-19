@@ -1,11 +1,11 @@
 import { rm } from "node:fs/promises";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 import { json } from "../helpers.js";
 import { statePaths } from "../../src/state/paths.js";
 
-const fixtures: Awaited<ReturnType<typeof m3Fixture>>[] = [];
+const fixtures: Awaited<ReturnType<typeof changeFixture>>[] = [];
 beforeEach(() => {
   vi.stubEnv("IK_TEST_WORK", "synthetic-token");
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -16,7 +16,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 async function fixture() {
-  const f = await m3Fixture();
+  const f = await changeFixture();
   fixtures.push(f);
   f.c.http.maxConcurrentPerAccount = 3;
   f.c.http.readMaxAttempts = 3;

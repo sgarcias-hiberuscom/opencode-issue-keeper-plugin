@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 import { json } from "../helpers.js";
 import { changeReview, reviewHTML } from "../../src/core/review.js";
 import { inspectProposal } from "../../src/state/operator.js";
@@ -32,7 +32,7 @@ async function files(directory: string): Promise<string[]> {
 }
 
 describe("[7.5][7.6][10.5] privacy sentinel across the tool surface", () => {
-  let f: Awaited<ReturnType<typeof m3Fixture>>;
+  let f: Awaited<ReturnType<typeof changeFixture>>;
   const outputs: string[] = [];
   const logs: string[] = [];
   const results = new Map<string, Array<{ ok: boolean; error?: { code: string } }>>();
@@ -43,7 +43,7 @@ describe("[7.5][7.6][10.5] privacy sentinel across the tool surface", () => {
     const capture = (chunk: unknown) => { logs.push(typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString()); return true; };
     vi.spyOn(process.stderr, "write").mockImplementation(capture as typeof process.stderr.write);
     vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(" ")); });
-    f = await m3Fixture();
+    f = await changeFixture();
     f.c.http.readMaxAttempts = 1;
     f.files.set("101", { bytes: Buffer.from("hello"), filename: "example.txt" });
     f.remote.fields.attachment.push({ id: "101" });

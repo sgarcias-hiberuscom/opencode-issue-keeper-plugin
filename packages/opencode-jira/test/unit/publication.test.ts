@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { publication } from "../../src/core/comment.js";
 
-describe("[M3][TXT/MEN][CM-02–08] immutable publication conversion", () => {
+describe("[TXT/MEN][CM-02–08] immutable publication conversion", () => {
   it.each(["plain", "markdown"] as const)("keeps source coordinates through Unicode and CRLF in %s", (format) => {
     const source = "😀 primera\r\nAna y Ana";
     const mentions = [source.indexOf("Ana"), source.lastIndexOf("Ana")].map((start) => ({ start, end: start + 3, accountId: "id:1", displayName: "Ana real" }));

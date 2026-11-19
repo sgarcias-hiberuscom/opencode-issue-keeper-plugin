@@ -15,7 +15,7 @@ function progress(): StoredChange {
   const payloadHash = planHash(plan);
   return { plan, payloadHash, execution: { proposalId: plan.id, payloadHash, state: "unknown", revision: 5, updatedAt: instant, steps: [{ id: "file-1", state: "confirmed" }, { id: "file-2", state: "pending" }] }, receipts: { "file-1": { remoteIds: ["100"], temporaryAttachmentIds: [], confirmedAt: instant, verifiedAt: instant } } };
 }
-describe("[M5][RES-01][RC-05–08] durable outcome classification", () => {
+describe("[RES-01][RC-05–08] durable outcome classification", () => {
   it.each(["unknown", "failed"] as const)("identifies %s partial uploads without suggesting retries", (state) => {
     const saved = progress(); saved.execution.state = state;
     if (state === "failed") { saved.execution.steps[1]!.state = "failed"; saved.execution.steps[1]!.rejectionStatus = 429; }

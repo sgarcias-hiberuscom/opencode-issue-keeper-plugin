@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const modulePath = new URL("../../scripts/phase2-campaign.mjs", import.meta.url).href;
+const modulePath = new URL("../../scripts/live-write-campaign.mjs", import.meta.url).href;
 const { mutationTarget, campaignResult, runCampaign } = await import(modulePath);
 const accounts = [
   { id: "qa", siteUrl: "https://qa.atlassian.net", auth: { mode: "cloud-token" } },
@@ -13,7 +13,7 @@ const targets = [{ account: "qa", site: accounts[0]!.siteUrl, issueKey: "QA-10",
 const roots: string[] = [];
 afterEach(async () => { vi.unstubAllGlobals(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
-describe("[M5][INT-01/03][OP-05] bounded opt-in QA campaign", () => {
+describe("[INT-01/03][OP-05] bounded opt-in QA campaign", () => {
   for (const [prefix, account] of [["https://qa.atlassian.net", "qa"], ["https://api.atlassian.com/ex/jira/cloud-a", "scoped"]] as const) {
     for (const [method, path] of [["PUT", "/rest/api/3/issue/QA-10"], ["POST", "/rest/api/3/issue/QA-10/comment"], ["POST", "/rest/api/3/issue/QA-10/transitions"], ["POST", "/rest/api/3/issue/QA-10/attachments"], ["POST", "/rest/servicedeskapi/request/QA-10/comment"], ["POST", "/rest/servicedeskapi/request/QA-10/attachment"], ["POST", "/rest/servicedeskapi/servicedesk/2/attachTemporaryFile"]] as const) {
       it(`allows only declared ${account} ${method} ${path}`, () => {

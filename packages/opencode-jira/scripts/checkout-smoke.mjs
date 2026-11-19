@@ -15,7 +15,7 @@ try {
   await mkdir(join(project, ".github/workflows"), { recursive: true });
   await mkdir(join(project, "doc"), { recursive: true });
   await cp(join(root, "doc/plugin-jira-opencode.md"), join(project, "doc/plugin-jira-opencode.md"));
-  await cp(join(root, ".github/workflows/jira-read.yml"), join(project, ".github/workflows/jira-read.yml"));
+  await cp(join(root, ".github/workflows/ci.yml"), join(project, ".github/workflows/ci.yml"));
   const cache = execFileSync("npm", ["config", "get", "cache"], { encoding: "utf8", timeout: 10000 }).trim();
   const env = { PATH: process.env.PATH, HOME: join(scratch, "home"), XDG_CONFIG_HOME: join(scratch, "config"), XDG_DATA_HOME: join(scratch, "data"), npm_config_cache: cache, npm_config_update_notifier: "false" };
   const run = (args) => execFileSync("npm", args, { cwd: pkg, env, stdio: "pipe", timeout: 180000, maxBuffer: 8 * 1024 * 1024 });

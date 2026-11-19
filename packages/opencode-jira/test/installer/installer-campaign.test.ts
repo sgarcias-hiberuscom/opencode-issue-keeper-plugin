@@ -1,5 +1,3 @@
-// Campaña 10.6: sólo los puntos sin cobertura en installer.test.ts ni registry.test.ts
-// (ver doc/desglose-tareas-fase-3.md, T12, y reports/release/T12-resultado.md).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";

@@ -6,7 +6,7 @@ import { attachmentLinkId } from "../../src/jira/attachment-links.js";
 import { config } from "../helpers.js";
 import type { JsonValue } from "../../src/core/proposals.js";
 
-describe("[M3][MET-03][AT-05] structural ADF and contextual values", () => {
+describe("[MET-03][AT-05] structural ADF and contextual values", () => {
   it.each([{}, { type: "text" }, { type: "text", text: "" }, { type: "paragraph", content: [{ type: "banana" }] }, { type: "paragraph", content: [{ type: "text", text: "x", attrs: { id: "unknown" } }] }, { type: "paragraph", content: [{ type: "text", text: "x", marks: [{ type: "link", attrs: { href: "file:///secret" } }] }] }, { type: "listItem", content: [] }, { type: "heading", attrs: { level: 9 }, content: [] }])("rejects malformed or privileged nodes %j", (node) => {
     expect(validAdfDocument({ type: "doc", version: 1, content: [node as JsonValue] })).toBe(false);
   });
@@ -21,7 +21,7 @@ describe("[M3][MET-03][AT-05] structural ADF and contextual values", () => {
   });
 });
 
-describe("[M3][UP-03][HTTP-01] extract attachment IDs without following links", () => {
+describe("[UP-03][HTTP-01] extract attachment IDs without following links", () => {
   it.each(["https://evil.invalid/rest/api/3/attachment/123", "https://example.atlassian.net/rest/api/3/attachment/123?token=secret", "https://example.atlassian.net/rest/api/3/attachment/123#fragment", "https://person@example.atlassian.net/rest/api/3/attachment/123", "https://example.atlassian.net/other/rest/api/3/attachment/123", "https://example.atlassian.net/rest/api/3/attachment/0", "javascript:alert(1)"])("rejects manipulated remote references without exposing them", (link) => {
     expect(() => attachmentLinkId(config().accounts[0]!, link)).toThrow("Respuesta Jira no válida");
   });

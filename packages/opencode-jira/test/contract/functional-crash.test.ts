@@ -4,11 +4,11 @@ import { writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { m3Fixture } from "../m3-fixtures.js";
+import { changeFixture } from "../change-fixtures.js";
 import { verifyRecorded } from "../../src/state/operator.js";
 import { planHash } from "../../src/core/proposals.js";
 
-const fixtures: Awaited<ReturnType<typeof m3Fixture>>[] = []; const children: ChildProcess[] = [];
+const fixtures: Awaited<ReturnType<typeof changeFixture>>[] = []; const children: ChildProcess[] = [];
 async function kill(child: ChildProcess) { if (child.exitCode === null && child.signalCode === null) { const exited = once(child, "exit"); child.kill("SIGKILL"); await exited; } }
 beforeEach(() => vi.stubEnv("IK_TEST_WORK", "synthetic-token"));
 afterEach(async () => { for (const child of children.splice(0)) await kill(child); for (const f of fixtures.splice(0)) { await f.close(); await rm(f.root, { recursive: true, force: true }); } vi.unstubAllEnvs(); });
@@ -17,9 +17,9 @@ for (const kind of ["fields", "transition"] as const) for (const checkpoint of [
 for (const audience of ["ticket", "internal", "public"] as const) for (const checkpoint of ["sending", "accepted", "confirmed"] as const) cases.push(["comment", audience, "mutation", checkpoint]);
 for (const audience of ["ticket", "internal", "public"] as const) for (const target of audience === "ticket" ? ["file-1"] : ["file-1", "publish"]) for (const checkpoint of ["sending", "accepted", "confirmed", "verified"] as const) cases.push(["upload", audience, target, checkpoint]);
 
-describe("[M3][REC/APL/UP/CMT][RC-03–07] actual process recovery by type and phase", () => {
+describe("[REC/APL/UP/CMT][RC-03–07] actual process recovery by type and phase", () => {
   it.each(cases)("survives %s/%s/%s SIGKILL at %s without duplicate emission", async (kind, audience, target, checkpoint) => {
-    const f = await m3Fixture(); fixtures.push(f);
+    const f = await changeFixture(); fixtures.push(f);
     const plan = kind === "fields" ? await f.prepare("issue_update_prepare", { update: { labels: [{ add: "crash-tested" }] } }) : kind === "transition" ? await f.prepare("transition_prepare", { transitionId: "31" }) : kind === "comment" ? await f.prepare("comment_prepare", { audience, text: "Ana", mentions: [{ start: 0, end: 3, accountId: audience === "public" ? "customer" : "person" }] }) : await f.prepare("attachment_upload_prepare", { audience, files: [await f.source("a.txt"), await f.source("b.txt")], ...(audience !== "ticket" ? { comment: "Ana", mentions: [{ start: 0, end: 3, accountId: audience === "public" ? "customer" : "person" }] } : {}) });
     const hash = planHash(plan); const configuration = join(f.root, "synthetic-config.json"); await writeFile(configuration, JSON.stringify(f.c), { mode: 0o600 });
     const child = fork(fileURLToPath(new URL("../fixtures/functional-worker.mjs", import.meta.url)), [f.data, plan.id, configuration, checkpoint, target], { // Runtimes before 26 accept the transform flag for TypeScript workers; 26 removed it and the loader transforms instead.

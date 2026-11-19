@@ -12,8 +12,8 @@ import { statePaths } from "../src/state/paths.js";
 import { changeReview } from "../src/core/review.js";
 import type { ChangePlan, JsonValue } from "../src/core/proposals.js";
 
-export async function m3Fixture(scoped = false, dataOverride?: string) {
-  const root = await mkdtemp("/tmp/opencode/jira-m3-"); const location = join(root, "location"); const data = dataOverride ?? join(root, "data");
+export async function changeFixture(scoped = false, dataOverride?: string) {
+  const root = await mkdtemp("/tmp/opencode/jira-changes-"); const location = join(root, "location"); const data = dataOverride ?? join(root, "data");
   await mkdir(join(location, "exports"), { recursive: true, mode: 0o700 });
   const c = config(true); c.accounts[0]!.readOnly = false; c.http.readMaxAttempts = 1; c.http.maxConcurrentPerAccount = 1;
   if (scoped) c.accounts[0]!.auth = { ...c.accounts[0]!.auth, mode: "cloud-scoped-token", cloudId: "11111111-2222-4333-8444-555555555555" };

@@ -8,7 +8,7 @@ import { HttpClient } from "../../src/http.js";
 import { Service } from "../../src/core/service.js";
 
 let directory: string;
-beforeEach(async () => { directory = await mkdtemp("/tmp/opencode/ik-phase1-"); vi.stubEnv("IK_TEST_WORK", "private-secret"); vi.stubEnv("IK_TEST_CLIENT", "client-secret"); });
+beforeEach(async () => { directory = await mkdtemp("/tmp/opencode/ik-reads-"); vi.stubEnv("IK_TEST_WORK", "private-secret"); vi.stubEnv("IK_TEST_CLIENT", "client-secret"); });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 const calls: [string, Record<string, unknown>][] = [

@@ -198,7 +198,7 @@ export async function runCampaign({ installed, configuration, manifest, output, 
 
 async function main() {
   const [installed, configPath, manifestPath, output, authorization] = process.argv.slice(2);
-  assert(authorization === "--qa-authorized", "Usage: phase2-campaign.mjs PACKAGE CONFIG MANIFEST OUTPUT --qa-authorized");
+  assert(authorization === "--qa-authorized", "Usage: live-write-campaign.mjs PACKAGE CONFIG MANIFEST OUTPUT --qa-authorized");
   const packagePath = await realpath(resolve(installed));
   const require = createRequire(join(packagePath, "package.json"));
   const { parse } = require("jsonc-parser");
