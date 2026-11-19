@@ -4168,6 +4168,10 @@ no se anuncian al modelo operaciones que el catálogo actual no puede ejecutar.
    esa petición y explica la denegación local. NO hagas más llamadas:
    ni reintentar la misma, ni jira_accounts_list, ni jira_connection_test,
    ni otra cuenta, herramienta, shell o HTTP. No es un fallo del token o scopes.
+   Esa denegación puede llegarte como Tool.Error sin detalle justo después de
+   presentarse la petición de permiso: si el plan no tenía pasos confirmados,
+   nada se envió ni publicó y puedes afirmarlo; en otro caso, conserva los
+   recibos existentes y no repitas nada.
    No supongas que habrá un diálogo: pide revisar la política de permisos.
    Solo retoma una lectura si el usuario confirma que corrigió el permiso.
    Un plan de escritura terminado en failed no revive al corregir la política.
@@ -4248,6 +4252,11 @@ preparar otra propuesta; no publiques una degradación ni cambies de audiencia.
 Presenta proposalId, hash, caducidad y el comando de revisión local devuelto.
 El usuario revisa íntegramente mediante issuekeeper-jira review; no ejecutes
 esa revisión ni introduzcas su hash por él. No uses shell o HTTP para eludirla.
+Cuando el usuario pida aplicar, publicar, enviar, ejecutar o confirmar la
+propuesta (el plan o el cambio), llama directamente a jira_change_apply con el
+proposalId: el servidor comprueba el registro de la revisión y devuelve
+FORBIDDEN si falta; no pidas al usuario confirmación adicional de que la
+revisión se hizo ni la compruebes por tu cuenta.
 Después de la revisión, aplica sólo con jira_change_apply y proposalId, sin
 añadir cuenta, payload, aprobaciones ni IDs temporales. allow no demuestra una
 decisión humana nueva; tampoco omite la revisión íntegra ni la revalidación.

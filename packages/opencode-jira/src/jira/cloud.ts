@@ -149,6 +149,9 @@ export class JiraCloud implements TicketProvider {
     const omitted = allowed.length !== raw.issues.length;
     const results = allowed.map((issue) => this.normalize(account, issue, fields));
     const warnings = [...new Set([...results.flatMap((r) => r.warnings), ...(omitted ? ["Se han omitido resultados de proyectos restringidos; no se muestran sus datos."] : [])])];
+    if (previous && results.length === 0) {
+      warnings.push("La continuación no devolvió resultados. Si la página anterior anunciaba más, los datos pueden haber cambiado o la búsqueda puede estar incompleta: compruébalo con una búsqueda nueva.");
+    }
     recordWarnings(warnings);
     const isLast = raw.isLast === true || !raw.nextPageToken;
     return {

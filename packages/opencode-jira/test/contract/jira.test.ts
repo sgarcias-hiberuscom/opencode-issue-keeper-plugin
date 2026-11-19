@@ -26,6 +26,7 @@ describe("Jira Platform reads", () => {
     await expect(provider.search(c.accounts[0]!, { ...input, fields: ["summary"], cursor: first.data.cursor }, signal())).rejects.toMatchObject({ code: "CURSOR_INVALID" });
     const second = await provider.search(c.accounts[0]!, { ...input, cursor: first.data.cursor }, signal());
     expect(second.data).toEqual({ values: [], isLast: true, cursor: undefined });
+    expect(second.warnings.join(" ")).toContain("búsqueda puede estar incompleta");
     expect(fetcher).toHaveBeenCalledTimes(2); provider.close();
   });
   it("rejects repeated search tokens and disallowed returned projects", async () => {

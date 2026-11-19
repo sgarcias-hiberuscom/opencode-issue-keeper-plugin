@@ -54,7 +54,7 @@ describe("[APL/REV/REC][PR-02–PR-11][RC-01–RC-09] protected offline applicat
   it.each(["session", "location"])("blocks a different %s even for confirmed receipt access", async (kind) => {
     const f = await fixture(); await f.app.apply(f.plan.id, f.context);
     if (kind === "session") f.context.sessionID = "different"; else f.move();
-    await expect(f.app.apply(f.plan.id, f.context)).rejects.toMatchObject({ code: "FILE_ACCESS_DENIED" }); expect(f.sent()).toBe(1);
+    await expect(f.app.apply(f.plan.id, f.context)).rejects.toMatchObject({ code: "PROPOSAL_INVALID" }); expect(f.sent()).toBe(1);
   });
   it.each(["account", "site", "credentialIdentity", "issueId", "issueKey", "projectKey", "policyFingerprint", "updated"] as const)("revalidates %s after waiting for permission", async (field) => {
     const f = await fixture(); const hash = changeReview(f.plan).payloadHash;
@@ -144,7 +144,7 @@ describe("[APL/REV/REC][PR-02–PR-11][RC-01–RC-09] protected offline applicat
     f.ports.authorize = async () => { started(); await new Promise<void>((resolve) => { decide = resolve; }); };
     const task = f.app.apply(f.plan.id, f.context);
     const original = new Error("server session unavailable");
-    const rejected = cause === "session-unavailable" ? expect(task).rejects.toBe(original) : expect(task).rejects.toMatchObject(cause === "location" ? { code: "FILE_ACCESS_DENIED" } : { reason: "EXPIRED" });
+    const rejected = cause === "session-unavailable" ? expect(task).rejects.toBe(original) : expect(task).rejects.toMatchObject(cause === "location" ? { code: "PROPOSAL_INVALID" } : { reason: "EXPIRED" });
     await ready;
     if (cause === "location") f.move();
     if (cause === "expiry") f.clock(f.plan.expiresAt);

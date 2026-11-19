@@ -79,7 +79,7 @@ export class ChangeApplication<Binding> {
     const current = await context.resolve();
     cancellation(context.signal);
     if (context.sessionID !== plan.sessionID || current.sessionID !== plan.sessionID || current.locationID !== plan.locationID) {
-      throw new IssueKeeperError("FILE_ACCESS_DENIED", "La propuesta pertenece a otra sesión o ubicación.");
+      throw new IssueKeeperError("PROPOSAL_INVALID", "La propuesta pertenece a otra sesión o ubicación.");
     }
     context.onAccount?.(plan.account);
   }

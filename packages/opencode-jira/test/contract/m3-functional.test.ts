@@ -47,6 +47,22 @@ describe("[M3][MET/APL/REG][AT/TR] functional tools", () => {
     const transitions = await f.harness.invoke("transitions_list", { account: "work", issueKey: "IK-1" });
     expect(transitions.data.transitions[0].fields).toContainEqual(expect.objectContaining({ id: "summary", required: true })); expect(f.ledger).toHaveLength(0);
   });
+  it("[5.6][ME-01] explains that unverified candidates are not a denial and comment_prepare validates mentions", async () => {
+    const f = await fixture();
+    const candidates = f.harness.tools.get("mention_candidates")!.description;
+    expect(candidates).toContain("unverified no es una denegación");
+    expect(candidates).toContain("comment_prepare");
+    expect(candidates).toContain("MENTION_NOT_ALLOWED");
+    const prepare = f.harness.tools.get("comment_prepare")!.description;
+    expect(prepare).toContain("MENTION_NOT_ALLOWED");
+    expect(prepare).toContain("aunque los candidatos figuren como unverified");
+    const apply = f.harness.tools.get("change_apply")!.description;
+    expect(apply).toContain("llama directamente");
+    expect(apply).toContain("FORBIDDEN");
+    expect(apply).toContain("no pidas al usuario confirmación adicional");
+    expect(apply).toContain("PROPOSAL_INVALID");
+    expect(apply).toContain("no reenvíes ese ID ni ofrezcas hacerlo");
+  });
   it.each([false, true])("prepares, journals, verifies and deduplicates incremental fields (scoped=%s)", async (scoped) => {
     const f = await fixture(scoped); const plan = await f.prepare("issue_update_prepare", { update: { labels: [{ add: "new" }, { remove: "read" }] } });
     expect(f.ledger).toHaveLength(0); const hash = planHash(plan);
